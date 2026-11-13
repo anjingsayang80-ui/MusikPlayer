@@ -3,6 +3,13 @@ package com.musikplayer.app
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Intent
+import android.media.session.MediaSession
+import android.media.session.PlaybackState
 import android.content.ContentUris
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
@@ -38,11 +45,18 @@ class MainActivity : Activity() {
     private val accent = Color.rgb(177,91,255)
     private val handler = Handler()
     private var ticker: Runnable? = null
+    private var mediaSession: MediaSession? = null
+    private lateinit var notificationManager: NotificationManager
+    private val channelId = "musik_player_controls"
+    private val actionPrevious = "com.musikplayer.app.PREVIOUS"
+    private val actionToggle = "com.musikplayer.app.TOGGLE"
+    private val actionNext = "com.musikplayer.app.NEXT"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.statusBarColor = bg
         window.navigationBarColor = Color.BLACK
+        setupMediaControls()
         if (hasPermission()) showLibrary() else requestPermissions(arrayOf(permission()), 41)
     }
     private fun permission() = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_AUDIO else Manifest.permission.READ_EXTERNAL_STORAGE
@@ -50,6 +64,7 @@ class MainActivity : Activity() {
     override fun onRequestPermissionsResult(r: Int, p: Array<out String>, g: IntArray) {
         super.onRequestPermissionsResult(r,p,g)
         if (r == 41 && g.isNotEmpty() && g[0] == PackageManager.PERMISSION_GRANTED) showLibrary()
+        else if (r == 42) { /* Notifikasi opsional; pemutar tetap bisa digunakan. */ }
         else setContentView(label("Izinkan akses musik agar semua lagu di HP bisa ditemukan.",17f,Color.WHITE).apply { gravity=Gravity.CENTER })
     }
     private fun dp(v:Int)=(v*resources.displayMetrics.density).toInt()
@@ -58,6 +73,7 @@ class MainActivity : Activity() {
     private fun centered(s:String,size:Float,color:Int=Color.WHITE,bold:Boolean=false)=label(s,size,color,bold).apply { gravity=Gravity.CENTER }
 
     private fun showLibrary() {
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 42)
         loadSongs()
         val root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(bg) }
         val header=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(18),dp(12),dp(18),dp(6)) }
@@ -170,14 +186,15 @@ class MainActivity : Activity() {
             player=MediaPlayer().apply{
                 setDataSource(this@MainActivity,ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,s.id))
                 setOnCompletionListener{nextSong()}
-                setOnPreparedListener{mp->mp.start();miniPlay.text="Ⅱ"}
+                setOnPreparedListener{mp->mp.start();miniPlay.text="Ⅱ"; updateMediaNotification(true)}
                 prepareAsync()
             }
             nowTitle.text=s.title;nowArtist.text=s.artist
             try{val u=ContentUris.withAppendedId(Uri.parse("content://media/external/audio/albumart"),s.albumId);contentResolver.openInputStream(u)?.use{miniArt.setImageBitmap(BitmapFactory.decodeStream(it))}?:miniArt.setImageResource(R.drawable.app_icon)}catch(_:Exception){miniArt.setImageResource(R.drawable.app_icon)}
+            updateMediaNotification(false)
         }catch(_:Exception){Toast.makeText(this,"Tidak bisa memutar file ini",Toast.LENGTH_SHORT).show();nextSong()}
     }
-    private fun togglePlay(){val p=player;if(p==null){if(songs.isNotEmpty())playSong(0)}else if(p.isPlaying){p.pause();miniPlay.text="▶"}else{p.start();miniPlay.text="Ⅱ"}}
+    private fun togglePlay(){val p=player;if(p==null){if(songs.isNotEmpty())playSong(0)}else if(p.isPlaying){p.pause();miniPlay.text="▶";updateMediaNotification(false)}else{p.start();miniPlay.text="Ⅱ";updateMediaNotification(true)}}
     private fun nextSong(){if(songs.isNotEmpty())playSong(if(current<0)0 else(current+1)%songs.size)}
     private fun showNowPlaying(){
         if(current !in songs.indices)return
@@ -193,7 +210,79 @@ class MainActivity : Activity() {
         box.addView(controls)
         AlertDialog.Builder(this).setView(box).setPositiveButton("Tutup",null).show().window?.setBackgroundDrawableResource(android.R.color.transparent)
     }
+
+    private fun setupMediaControls() {
+        notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        if (Build.VERSION.SDK_INT >= 26) {
+            notificationManager.createNotificationChannel(NotificationChannel(channelId, "Kontrol Musik", NotificationManager.IMPORTANCE_LOW).apply {
+                description = "Kontrol pemutar musik di panel notifikasi"
+                setShowBadge(false)
+            })
+        }
+        mediaSession = MediaSession(this, "MusikPlayerSession").apply {
+            setCallback(object : MediaSession.Callback() {
+                override fun onPlay() { if (player == null && songs.isNotEmpty()) playSong(if (current < 0) 0 else current) else if (player?.isPlaying == false) togglePlay() }
+                override fun onPause() { if (player?.isPlaying == true) togglePlay() }
+                override fun onSkipToNext() { nextSong() }
+                override fun onSkipToPrevious() { if (songs.isNotEmpty()) playSong(if (current <= 0) songs.lastIndex else current - 1) }
+            })
+            isActive = true
+        }
+    }
+
+    private fun mediaActionIntent(action: String, requestCode: Int): PendingIntent {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            this.action = action
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        return PendingIntent.getActivity(this, requestCode, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+    }
+
+    private fun updateMediaNotification(playing: Boolean) {
+        if (current !in songs.indices) return
+        val song = songs[current]
+        val session = mediaSession ?: return
+        val duration = song.duration
+        val position = try { player?.currentPosition?.toLong() ?: 0L } catch (_: Exception) { 0L }
+        session.setMetadata(android.media.MediaMetadata.Builder()
+            .putString(android.media.MediaMetadata.METADATA_KEY_TITLE, song.title)
+            .putString(android.media.MediaMetadata.METADATA_KEY_ARTIST, song.artist)
+            .putLong(android.media.MediaMetadata.METADATA_KEY_DURATION, duration)
+            .build())
+        session.setPlaybackState(PlaybackState.Builder()
+            .setActions(PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_PLAY_PAUSE or PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SKIP_TO_PREVIOUS or PlaybackState.ACTION_SEEK_TO)
+            .setState(if (playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED, position, if (playing) 1f else 0f)
+            .build())
+        val previous = Notification.Action.Builder(android.R.drawable.ic_media_previous, "Sebelumnya", mediaActionIntent(actionPrevious, 1)).build()
+        val playPause = Notification.Action.Builder(if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play, if (playing) "Jeda" else "Putar", mediaActionIntent(actionToggle, 2)).build()
+        val next = Notification.Action.Builder(android.R.drawable.ic_media_next, "Berikutnya", mediaActionIntent(actionNext, 3)).build()
+        val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, channelId) else Notification.Builder(this)
+        builder.setSmallIcon(R.drawable.app_icon)
+            .setContentTitle(song.title)
+            .setContentText(song.artist)
+            .setLargeIcon((miniArt.drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap)
+            .setContentIntent(mediaActionIntent("", 4))
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
+            .setOnlyAlertOnce(true)
+            .setOngoing(playing)
+            .addAction(previous)
+            .addAction(playPause)
+            .addAction(next)
+            .setStyle(Notification.MediaStyle().setMediaSession(session.sessionToken).setShowActionsInCompactView(0, 1, 2))
+        notificationManager.notify(77, builder.build())
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        when (intent.action) {
+            actionPrevious -> if (songs.isNotEmpty()) playSong(if (current <= 0) songs.lastIndex else current - 1)
+            actionToggle -> togglePlay()
+            actionNext -> nextSong()
+        }
+        intent.action = null
+    }
+
     private fun clock(ms:Long)=String.format("%d:%02d",TimeUnit.MILLISECONDS.toMinutes(ms),TimeUnit.MILLISECONDS.toSeconds(ms)%60)
     private fun sizeLabel(bytes:Long)=if(bytes>=1048576)String.format("%.1f MB",bytes/1048576.0) else (bytes/1024).toString()+" KB"
-    override fun onDestroy(){ticker?.let{handler.removeCallbacks(it)};player?.release();player=null;super.onDestroy()}
+    override fun onDestroy(){ticker?.let{handler.removeCallbacks(it)};player?.release();player=null;mediaSession?.isActive=false;mediaSession?.release();mediaSession=null;notificationManager.cancel(77);super.onDestroy()}
 }
