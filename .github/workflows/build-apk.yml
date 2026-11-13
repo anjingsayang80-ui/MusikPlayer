@@ -26,27 +26,12 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Extract project
-        run: unzip -q Musik_Player_Android_Phone_Build.zip -d extracted
-
-      - name: Align Kotlin target with Java target
-        run: |
-          cat > extracted/MusikPlayerAndroid/jvm-target.gradle <<'EOF'
-          allprojects {
-              tasks.configureEach { task ->
-                  if (task.class.name.contains('KotlinCompile')) {
-                      task.kotlinOptions.jvmTarget = '1.8'
-                  }
-              }
-          }
-          EOF
-
       - name: Build APK
-        run: gradle -I "$GITHUB_WORKSPACE/extracted/MusikPlayerAndroid/jvm-target.gradle" -p "$GITHUB_WORKSPACE/extracted/MusikPlayerAndroid" assembleDebug
+        run: gradle -p "$GITHUB_WORKSPACE/MusicPlayerApp" assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Musik-Player-APK
-          path: extracted/MusikPlayerAndroid/app/build/outputs/apk/debug/app-debug.apk
+          path: MusicPlayerApp/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
