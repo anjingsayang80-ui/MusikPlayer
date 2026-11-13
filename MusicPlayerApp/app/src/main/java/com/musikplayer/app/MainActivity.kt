@@ -147,7 +147,7 @@ class MainActivity : Activity() {
             player = MediaPlayer().apply {
                 setDataSource(this@MainActivity, uri)
                 setOnCompletionListener { nextSong() }
-                setOnPreparedListener { start(); playButton.text = "Ⅱ" }
+                setOnPreparedListener { mp -> mp.start(); playButton.text = "Ⅱ" }
                 prepareAsync()
             }
             renderSong()
