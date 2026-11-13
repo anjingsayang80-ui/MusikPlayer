@@ -2,6 +2,7 @@ package com.musikplayer.app
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.ContentUris
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
@@ -12,160 +13,187 @@ import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
 import android.provider.MediaStore
 import android.view.Gravity
 import android.widget.*
 import java.util.concurrent.TimeUnit
 
-data class Song(val id: Long, val title: String, val artist: String, val albumId: Long, val duration: Long)
+data class Song(val id: Long, val title: String, val artist: String, val albumId: Long, val duration: Long, val size: Long)
 
 class MainActivity : Activity() {
     private val songs = mutableListOf<Song>()
     private var player: MediaPlayer? = null
-    private var current = 0
-    private lateinit var titleView: TextView
-    private lateinit var artistView: TextView
-    private lateinit var timeView: TextView
-    private lateinit var seek: SeekBar
-    private lateinit var playButton: TextView
-    private lateinit var album: ImageView
-    private var seeking = false
+    private var current = -1
+    private lateinit var count: TextView
+    private lateinit var nowTitle: TextView
+    private lateinit var nowArtist: TextView
+    private lateinit var miniPlay: TextView
+    private lateinit var miniArt: ImageView
+    private lateinit var listBox: LinearLayout
+    private lateinit var search: EditText
+    private val bg = Color.rgb(10,11,17)
+    private val panel = Color.rgb(24,25,34)
+    private val muted = Color.rgb(155,158,174)
+    private val accent = Color.rgb(177,91,255)
+    private val handler = Handler()
+    private var ticker: Runnable? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (hasAudioPermission()) showPlayer() else requestPermissions(arrayOf(audioPermission()), 41)
+        window.statusBarColor = bg
+        window.navigationBarColor = Color.BLACK
+        if (hasPermission()) showLibrary() else requestPermissions(arrayOf(permission()), 41)
     }
-    private fun audioPermission() = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_AUDIO else Manifest.permission.READ_EXTERNAL_STORAGE
-    private fun hasAudioPermission() = Build.VERSION.SDK_INT < 23 || checkSelfPermission(audioPermission()) == PackageManager.PERMISSION_GRANTED
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, results: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, results)
-        if (requestCode == 41 && results.isNotEmpty() && results[0] == PackageManager.PERMISSION_GRANTED) showPlayer()
-        else { val t = TextView(this); t.text = "Izin akses musik diperlukan agar semua lagu di HP bisa diputar."; t.gravity = Gravity.CENTER; t.setTextColor(Color.WHITE); t.textSize = 18f; setContentView(t) }
+    private fun permission() = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_AUDIO else Manifest.permission.READ_EXTERNAL_STORAGE
+    private fun hasPermission() = Build.VERSION.SDK_INT < 23 || checkSelfPermission(permission()) == PackageManager.PERMISSION_GRANTED
+    override fun onRequestPermissionsResult(r: Int, p: Array<out String>, g: IntArray) {
+        super.onRequestPermissionsResult(r,p,g)
+        if (r == 41 && g.isNotEmpty() && g[0] == PackageManager.PERMISSION_GRANTED) showLibrary()
+        else setContentView(label("Izinkan akses musik agar semua lagu di HP bisa ditemukan.",17f,Color.WHITE).apply { gravity=Gravity.CENTER })
     }
-    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
-    private fun label(text: String, size: Float, color: Int = Color.WHITE, bold: Boolean = false): TextView =
-        TextView(this).apply { this.text = text; textSize = size; setTextColor(color); if (bold) setTypeface(null, Typeface.BOLD); gravity = Gravity.CENTER }
-    private fun rounded(color: Int, radius: Float) = GradientDrawable().apply { setColor(color); cornerRadius = dp(radius.toInt()).toFloat() }
+    private fun dp(v:Int)=(v*resources.displayMetrics.density).toInt()
+    private fun panelBg(color:Int=panel,r:Int=14)=GradientDrawable().apply { setColor(color); cornerRadius=dp(r).toFloat() }
+    private fun label(s:String,size:Float,color:Int=Color.WHITE,bold:Boolean=false)=TextView(this).apply { text=s; textSize=size; setTextColor(color); if(bold)setTypeface(null,Typeface.BOLD) }
+    private fun centered(s:String,size:Float,color:Int=Color.WHITE,bold:Boolean=false)=label(s,size,color,bold).apply { gravity=Gravity.CENTER }
 
-    private fun showPlayer() {
+    private fun showLibrary() {
         loadSongs()
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; setPadding(dp(22), dp(18), dp(22), dp(12))
-            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0xFF777D7D.toInt(), 0xFF34383B.toInt(), 0xFF54242D.toInt()))
-        }
-        val top = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        top.addView(label("‹", 38f), LinearLayout.LayoutParams(dp(42), dp(48)))
-        top.addView(label("MUSIK PLAYER", 18f, Color.WHITE, true))
-        root.addView(top)
-
-        album = ImageView(this).apply { scaleType = ImageView.ScaleType.CENTER_CROP; background = rounded(0xFFB9B9B9.toInt(), 200f); clipToOutline = true }
-        val artWrap = FrameLayout(this)
-        artWrap.addView(album, FrameLayout.LayoutParams(dp(220), dp(220), Gravity.CENTER))
-        val artParams = LinearLayout.LayoutParams(-1, 0, 1f); artParams.topMargin = dp(16); artParams.bottomMargin = dp(10)
-        root.addView(artWrap, artParams)
-
-        titleView = label("Belum ada lagu", 20f, Color.WHITE, true)
-        artistView = label("Memindai musik di HP...", 14f, 0xFFE0E0E0.toInt())
-        root.addView(titleView); root.addView(artistView)
-
-        val tools = LinearLayout(this).apply { gravity = Gravity.CENTER; setPadding(0, dp(24), 0, dp(14)) }
-        listOf("♫\nEqualizer", "◈\nTampilan", "◷\nTimer", "☷\nDaftar lagu", "♡\nSuka").forEachIndexed { index, s ->
-            val v = label(s, 13f); v.setOnClickListener { if (index == 3) showSongList() else Toast.makeText(this@MainActivity, "Fitur ini segera hadir", Toast.LENGTH_SHORT).show() }
-            tools.addView(v, LinearLayout.LayoutParams(0, dp(58), 1f))
-        }
-        root.addView(tools)
-
-        val seekRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        timeView = label("0:00", 12f)
-        seek = SeekBar(this).apply { max = 1000; progressTintList = android.content.res.ColorStateList.valueOf(Color.WHITE); thumbTintList = android.content.res.ColorStateList.valueOf(Color.WHITE) }
-        val duration = label("0:00", 12f)
-        seekRow.addView(timeView); seekRow.addView(seek, LinearLayout.LayoutParams(0, dp(38), 1f)); seekRow.addView(duration)
-        root.addView(seekRow)
-        seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onStartTrackingTouch(s: SeekBar?) { seeking = true }
-            override fun onStopTrackingTouch(s: SeekBar?) { player?.seekTo((player?.duration ?: 0) * (s?.progress ?: 0) / 1000); seeking = false }
-            override fun onProgressChanged(s: SeekBar?, p: Int, user: Boolean) {}
-        })
-
-        val controls = LinearLayout(this).apply { gravity = Gravity.CENTER; setPadding(0, dp(28), 0, dp(8)) }
-        val shuffle = label("⇄", 28f); shuffle.setOnClickListener { songs.shuffle(); current = 0; playCurrent() }
-        val prev = label("|◀", 30f); prev.setOnClickListener { previous() }
-        playButton = label("▶", 42f); playButton.setOnClickListener { togglePlay() }
-        val next = label("▶|", 30f); next.setOnClickListener { nextSong() }
-        val queue = label("☷", 30f); queue.setOnClickListener { showSongList() }
-        listOf(shuffle to 1f, prev to 1f, playButton to 1.4f, next to 1f, queue to 1f).forEach { (v, w) -> controls.addView(v, LinearLayout.LayoutParams(0, dp(64), w)) }
-        root.addView(controls)
-        val all = label("PUTAR SEMUA  •  " + songs.size + " LAGU", 13f, Color.WHITE, true)
-        all.setPadding(0, dp(8), 0, dp(8)); all.setOnClickListener { if (songs.isNotEmpty()) { current = 0; playCurrent() } }
-        root.addView(all)
-        setContentView(root)
-        renderSong()
-        if (songs.isNotEmpty()) playCurrent()
-        val handler = android.os.Handler(mainLooper)
-        val tick = object : Runnable {
-            override fun run() {
-                val p = player
-                if (p != null && p.isPlaying && !seeking) {
-                    seek.progress = if (p.duration > 0) p.currentPosition * 1000 / p.duration else 0
-                    timeView.text = clock(p.currentPosition.toLong())
-                }
-                handler.postDelayed(this, 500)
+        val root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(bg) }
+        val header=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(18),dp(12),dp(18),dp(6)) }
+        val brand=LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL }
+        val logo=ImageView(this).apply { setImageResource(R.drawable.app_icon) }
+        brand.addView(logo,LinearLayout.LayoutParams(dp(44),dp(44)))
+        val brandName=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(10),0,0,0) }
+        brandName.addView(label("MUSIK PLAYER",17f,Color.WHITE,true))
+        brandName.addView(label("Temukan irama favoritmu",11f,muted))
+        brand.addView(brandName,LinearLayout.LayoutParams(0,-2,1f))
+        brand.addView(centered("⌕",29f).apply { setOnClickListener { search.requestFocus(); (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).showSoftInput(search,0) } },LinearLayout.LayoutParams(dp(42),dp(44)))
+        header.addView(brand)
+        val tabs=LinearLayout(this).apply { gravity=Gravity.CENTER; setPadding(0,dp(14),0,dp(4)) }
+        listOf("Unduh","Video","Musik","Pribadi").forEach { name ->
+            val t=centered(name,14f,if(name=="Musik") Color.WHITE else muted,name=="Musik").apply {
+                setPadding(dp(8),dp(10),dp(8),dp(10))
+                if(name=="Musik") background=GradientDrawable().apply { setColor(0x222D2140); setStroke(dp(1),accent); cornerRadius=dp(12).toFloat() }
+                setOnClickListener { if(name!="Musik") Toast.makeText(this@MainActivity,"Bagian $name segera hadir",Toast.LENGTH_SHORT).show() }
             }
+            tabs.addView(t,LinearLayout.LayoutParams(0,dp(42),1f))
         }
-        handler.post(tick)
+        header.addView(tabs); root.addView(header)
+
+        val searchWrap=LinearLayout(this).apply { setPadding(dp(18),dp(4),dp(18),dp(10)) }
+        search=EditText(this).apply {
+            hint="Cari judul lagu atau artis"; setHintTextColor(muted); setTextColor(Color.WHITE); textSize=14f
+            singleLine=true; setPadding(dp(14),0,dp(14),0); background=panelBg()
+            addTextChangedListener(object:android.text.TextWatcher {
+                override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int){}
+                override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int){ renderSongs(s?.toString().orEmpty()) }
+                override fun afterTextChanged(s:android.text.Editable?){}
+            })
+        }
+        searchWrap.addView(search,LinearLayout.LayoutParams(-1,dp(44))); root.addView(searchWrap)
+
+        val section=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(20),dp(4),dp(20),dp(10)) }
+        val heading=LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL }
+        heading.addView(label("Semua Lagu",21f,Color.WHITE,true),LinearLayout.LayoutParams(0,-2,1f))
+        count=label(songs.size.toString()+" lagu ditemukan",12f,muted); heading.addView(count); section.addView(heading)
+        val actions=LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL; setPadding(0,dp(12),0,0) }
+        val playAll=centered("▶   PUTAR SEMUA",13f,Color.WHITE,true).apply {
+            background=GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,intArrayOf(0xFF9B4DFF.toInt(),0xFF4D75FF.toInt())).apply { cornerRadius=dp(24).toFloat() }
+            setOnClickListener { if(songs.isNotEmpty()) playSong(0) else Toast.makeText(this@MainActivity,"Belum ada lagu",Toast.LENGTH_SHORT).show() }
+        }
+        actions.addView(playAll,LinearLayout.LayoutParams(0,dp(44),1f))
+        actions.addView(centered("⤨  Acak",13f).apply { setOnClickListener { if(songs.isNotEmpty()){ songs.shuffle(); renderSongs(search.text.toString()); playSong(0) } } },LinearLayout.LayoutParams(dp(94),dp(44)))
+        section.addView(actions); root.addView(section)
+
+        val scroll=ScrollView(this).apply { clipToPadding=false; setPadding(0,0,0,dp(8)) }
+        listBox=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),0,dp(16),dp(8)) }
+        scroll.addView(listBox); root.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
+
+        val mini=LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL; setPadding(dp(10),dp(7),dp(10),dp(7)); background=panelBg(Color.rgb(31,29,43),15); setOnClickListener { showNowPlaying() } }
+        miniArt=ImageView(this).apply { scaleType=ImageView.ScaleType.CENTER_CROP; setImageResource(R.drawable.app_icon); background=panelBg(); clipToOutline=true }
+        mini.addView(miniArt,LinearLayout.LayoutParams(dp(44),dp(44)))
+        val info=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(10),0,0,0) }
+        nowTitle=label("Pilih lagu untuk diputar",13f,Color.WHITE,true); nowArtist=label("Musik di perangkat kamu",11f,muted)
+        info.addView(nowTitle); info.addView(nowArtist); mini.addView(info,LinearLayout.LayoutParams(0,-2,1f))
+        miniPlay=centered("▶",22f); miniPlay.setOnClickListener { togglePlay() }; mini.addView(miniPlay,LinearLayout.LayoutParams(dp(44),dp(44)))
+        val miniWrap=LinearLayout(this).apply { setPadding(dp(12),dp(4),dp(12),dp(6)); addView(mini) }; root.addView(miniWrap)
+
+        val nav=LinearLayout(this).apply { gravity=Gravity.CENTER; setPadding(dp(8),dp(6),dp(8),dp(8)); setBackgroundColor(Color.rgb(20,21,28)) }
+        listOf("⌂\nRumah","♫\nMusik","▣\nGame","⇩\nFile Saya","♙\nSaya").forEachIndexed { i,item ->
+            nav.addView(centered(item,11f,if(i==1)accent else muted,i==1).apply { setOnClickListener { if(i!=1) Toast.makeText(this@MainActivity,"Menu segera hadir",Toast.LENGTH_SHORT).show() } },LinearLayout.LayoutParams(0,dp(48),1f))
+        }
+        root.addView(nav)
+        setContentView(root)
+        renderSongs("")
+        ticker=object:Runnable { override fun run(){ if(player?.isPlaying==true) miniPlay.text="Ⅱ"; handler.postDelayed(this,700) } }
+        handler.post(ticker!!)
     }
 
     private fun loadSongs() {
         songs.clear()
-        val collection = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
-        val projection = arrayOf(MediaStore.Audio.Media._ID, MediaStore.Audio.Media.TITLE, MediaStore.Audio.Media.ARTIST, MediaStore.Audio.Media.ALBUM_ID, MediaStore.Audio.Media.DURATION)
-        val selection = MediaStore.Audio.Media.IS_MUSIC + " != 0"
-        contentResolver.query(collection, projection, selection, null, MediaStore.Audio.Media.TITLE + " COLLATE NOCASE ASC")?.use { c ->
-            val id = c.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
-            val title = c.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
-            val artist = c.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
-            val albumId = c.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
-            val duration = c.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
-            while (c.moveToNext()) songs.add(Song(c.getLong(id), c.getString(title) ?: "Tanpa judul", c.getString(artist) ?: "Artis tidak diketahui", c.getLong(albumId), c.getLong(duration)))
+        val cols=arrayOf(MediaStore.Audio.Media._ID,MediaStore.Audio.Media.TITLE,MediaStore.Audio.Media.ARTIST,MediaStore.Audio.Media.ALBUM_ID,MediaStore.Audio.Media.DURATION,MediaStore.Audio.Media.SIZE)
+        contentResolver.query(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,cols,MediaStore.Audio.Media.IS_MUSIC+" != 0",null,MediaStore.Audio.Media.TITLE+" COLLATE NOCASE ASC")?.use { c ->
+            val id=c.getColumnIndexOrThrow(MediaStore.Audio.Media._ID); val title=c.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
+            val artist=c.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST); val album=c.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
+            val duration=c.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION); val size=c.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE)
+            while(c.moveToNext()) songs.add(Song(c.getLong(id),c.getString(title)?:"Tanpa judul",c.getString(artist)?:"Artis tidak diketahui",c.getLong(album),c.getLong(duration),c.getLong(size)))
         }
     }
-    private fun renderSong() {
-        if (songs.isEmpty()) { titleView.text = "Belum ada lagu"; artistView.text = "Tidak ditemukan file musik di HP"; album.setImageResource(android.R.drawable.ic_media_play); return }
-        val s = songs[current.coerceIn(0, songs.lastIndex)]
-        titleView.text = s.title; artistView.text = s.artist
-        val artUri = Uri.parse("content://media/external/audio/albumart")
-        try { contentResolver.openInputStream(ContentUris.withAppendedId(artUri, s.albumId))?.use { album.setImageBitmap(BitmapFactory.decodeStream(it)) } ?: album.setImageResource(android.R.drawable.ic_media_play) }
-        catch (_: Exception) { album.setImageResource(android.R.drawable.ic_media_play) }
-        timeView.text = "0:00"
+    private fun renderSongs(filter:String) {
+        if(!::listBox.isInitialized)return
+        listBox.removeAllViews()
+        val shown=songs.filter { it.title.contains(filter,true)||it.artist.contains(filter,true) }
+        count.text=shown.size.toString()+" lagu ditemukan"
+        if(shown.isEmpty()){ listBox.addView(centered(if(songs.isEmpty())"Belum ada file musik di HP" else "Lagu tidak ditemukan",14f,muted).apply{setPadding(0,dp(40),0,dp(40))}); return }
+        shown.forEach { song ->
+            val row=LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL; setPadding(dp(8),dp(7),dp(8),dp(7)); background=panelBg() }
+            val art=ImageView(this).apply { scaleType=ImageView.ScaleType.CENTER_CROP; background=panelBg(Color.rgb(40,35,55),10); clipToOutline=true; setImageResource(R.drawable.app_icon) }
+            try { val u=ContentUris.withAppendedId(Uri.parse("content://media/external/audio/albumart"),song.albumId); contentResolver.openInputStream(u)?.use{art.setImageBitmap(BitmapFactory.decodeStream(it))} }catch(_:Exception){}
+            row.addView(art,LinearLayout.LayoutParams(dp(58),dp(58)))
+            val info=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),0,dp(5),0) }
+            info.addView(label(song.title,14f,Color.WHITE,true).apply{maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END})
+            info.addView(label(song.artist,12f,muted).apply{maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END;setPadding(0,dp(3),0,dp(3))})
+            info.addView(label(clock(song.duration)+"  •  "+sizeLabel(song.size),10f,muted))
+            row.addView(info,LinearLayout.LayoutParams(0,-2,1f))
+            row.addView(centered("⋮",22f).apply{setOnClickListener{AlertDialog.Builder(this@MainActivity).setTitle(song.title).setItems(arrayOf("Putar sekarang","Tambahkan ke antrean")){_,which->if(which==0)playSong(songs.indexOf(song))else Toast.makeText(this@MainActivity,"Ditambahkan ke antrean",Toast.LENGTH_SHORT).show()}.show()}},LinearLayout.LayoutParams(dp(30),dp(52)))
+            row.setOnClickListener{playSong(songs.indexOf(song))}
+            val lp=LinearLayout.LayoutParams(-1,dp(76));lp.bottomMargin=dp(8);listBox.addView(row,lp)
+        }
     }
-    private fun playCurrent() {
-        if (songs.isEmpty()) return
+    private fun playSong(index:Int) {
+        if(index !in songs.indices)return
+        current=index
         try {
             player?.release()
-            val s = songs[current]
-            val uri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, s.id)
-            player = MediaPlayer().apply {
-                setDataSource(this@MainActivity, uri)
-                setOnCompletionListener { nextSong() }
-                setOnPreparedListener { mp -> mp.start(); playButton.text = "Ⅱ" }
+            val s=songs[current]
+            player=MediaPlayer().apply{
+                setDataSource(this@MainActivity,ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,s.id))
+                setOnCompletionListener{nextSong()}
+                setOnPreparedListener{mp->mp.start();miniPlay.text="Ⅱ"}
                 prepareAsync()
             }
-            renderSong()
-            Toast.makeText(this, "Memutar " + s.title, Toast.LENGTH_SHORT).show()
-        } catch (e: Exception) { Toast.makeText(this, "Tidak bisa memutar lagu ini", Toast.LENGTH_SHORT).show(); nextSong() }
+            nowTitle.text=s.title;nowArtist.text=s.artist
+            try{val u=ContentUris.withAppendedId(Uri.parse("content://media/external/audio/albumart"),s.albumId);contentResolver.openInputStream(u)?.use{miniArt.setImageBitmap(BitmapFactory.decodeStream(it))}?:miniArt.setImageResource(R.drawable.app_icon)}catch(_:Exception){miniArt.setImageResource(R.drawable.app_icon)}
+        }catch(_:Exception){Toast.makeText(this,"Tidak bisa memutar file ini",Toast.LENGTH_SHORT).show();nextSong()}
     }
-    private fun togglePlay() {
-        val p = player
-        if (p == null) playCurrent() else if (p.isPlaying) { p.pause(); playButton.text = "▶" } else { p.start(); playButton.text = "Ⅱ" }
+    private fun togglePlay(){val p=player;if(p==null){if(songs.isNotEmpty())playSong(0)}else if(p.isPlaying){p.pause();miniPlay.text="▶"}else{p.start();miniPlay.text="Ⅱ"}}
+    private fun nextSong(){if(songs.isNotEmpty())playSong(if(current<0)0 else(current+1)%songs.size)}
+    private fun showNowPlaying(){
+        if(current !in songs.indices)return
+        val s=songs[current]
+        val box=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;gravity=Gravity.CENTER;setPadding(dp(22),dp(22),dp(22),dp(22));background=GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,intArrayOf(0xFF24203B.toInt(),bg))}
+        box.addView(ImageView(this).apply{scaleType=ImageView.ScaleType.CENTER_CROP;setImageDrawable(miniArt.drawable)},LinearLayout.LayoutParams(dp(210),dp(210)))
+        box.addView(centered(s.title,19f,Color.WHITE,true).apply{setPadding(0,dp(18),0,dp(4))})
+        box.addView(centered(s.artist,13f,muted))
+        val controls=LinearLayout(this).apply{gravity=Gravity.CENTER}
+        controls.addView(centered("|◀",27f).apply{setOnClickListener{if(songs.isNotEmpty())playSong(if(current<=0)songs.lastIndex else current-1)}},LinearLayout.LayoutParams(dp(65),dp(60)))
+        controls.addView(centered(if(player?.isPlaying==true)"Ⅱ" else "▶",34f).apply{setOnClickListener{togglePlay();text=if(player?.isPlaying==true)"Ⅱ" else "▶"}},LinearLayout.LayoutParams(dp(70),dp(60)))
+        controls.addView(centered("▶|",27f).apply{setOnClickListener{nextSong()}},LinearLayout.LayoutParams(dp(65),dp(60)))
+        box.addView(controls)
+        AlertDialog.Builder(this).setView(box).setPositiveButton("Tutup",null).show().window?.setBackgroundDrawableResource(android.R.color.transparent)
     }
-    private fun nextSong() { if (songs.isNotEmpty()) { current = (current + 1) % songs.size; playCurrent() } }
-    private fun previous() { if (songs.isNotEmpty()) { current = if (current == 0) songs.lastIndex else current - 1; playCurrent() } }
-    private fun clock(ms: Long) = String.format("%d:%02d", TimeUnit.MILLISECONDS.toMinutes(ms), TimeUnit.MILLISECONDS.toSeconds(ms) % 60)
-    private fun showSongList() {
-        val names = songs.map { it.title + " — " + it.artist }.toTypedArray()
-        if (names.isEmpty()) { Toast.makeText(this, "Belum ada lagu ditemukan", Toast.LENGTH_SHORT).show(); return }
-        android.app.AlertDialog.Builder(this).setTitle("Semua Lagu (" + songs.size + ")").setItems(names) { _, which -> current = which; playCurrent() }
-            .setPositiveButton("Putar semua") { _, _ -> current = 0; playCurrent() }.setNegativeButton("Tutup", null).show()
-    }
-    override fun onDestroy() { player?.release(); player = null; super.onDestroy() }
+    private fun clock(ms:Long)=String.format("%d:%02d",TimeUnit.MILLISECONDS.toMinutes(ms),TimeUnit.MILLISECONDS.toSeconds(ms)%60)
+    private fun sizeLabel(bytes:Long)=if(bytes>=1048576)String.format("%.1f MB",bytes/1048576.0) else (bytes/1024).toString()+" KB"
+    override fun onDestroy(){ticker?.let{handler.removeCallbacks(it)};player?.release();player=null;super.onDestroy()}
 }
