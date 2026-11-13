@@ -59,7 +59,7 @@ class MainActivity : Activity() {
         root.addView(top)
 
         album = ImageView(this).apply { scaleType = ImageView.ScaleType.CENTER_CROP; background = rounded(0xFFB9B9B9.toInt(), 200f); clipToOutline = true }
-        val artWrap = FrameLayout(this).apply { gravity = Gravity.CENTER }
+        val artWrap = FrameLayout(this)
         artWrap.addView(album, FrameLayout.LayoutParams(dp(220), dp(220), Gravity.CENTER))
         val artParams = LinearLayout.LayoutParams(-1, 0, 1f); artParams.topMargin = dp(16); artParams.bottomMargin = dp(10)
         root.addView(artWrap, artParams)
