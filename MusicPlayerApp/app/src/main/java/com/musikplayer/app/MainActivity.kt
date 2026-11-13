@@ -100,7 +100,7 @@ class MainActivity : Activity() {
         val searchWrap=LinearLayout(this).apply { setPadding(dp(18),dp(4),dp(18),dp(10)) }
         search=EditText(this).apply {
             hint="Cari judul lagu atau artis"; setHintTextColor(muted); setTextColor(Color.WHITE); textSize=14f
-            isSingleLine=true; setPadding(dp(14),0,dp(14),0); background=panelBg()
+            isSingleLine = true; setPadding(dp(14),0,dp(14),0); background=panelBg()
             addTextChangedListener(object:android.text.TextWatcher {
                 override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int){}
                 override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int){ renderSongs(s?.toString().orEmpty()) }
