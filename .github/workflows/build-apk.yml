@@ -1,10 +1,9 @@
-
 name: Build Musik Player APK
 
 on:
   workflow_dispatch:
   push:
-    branches: [ utama ]
+    branches: [ main ]
 
 permissions:
   contents: read
@@ -12,7 +11,6 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,15 +27,14 @@ jobs:
           gradle-version: '8.9'
 
       - name: Extract project
-        run: |
-          unzip -q Musik_Player_Android_Phone_Build.zip -d extracted
+        run: unzip -q Musik_Player_Android_Phone_Build.zip -d extracted
 
       - name: Build APK
-        run: gradle -p extracted/MusikPlayer assembleDebug
+        run: gradle -p extracted/MusikPlayerAndroid assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Musik-Player-APK
-          path: extracted/MusikPlayer/app/build/outputs/apk/debug/app-debug.apk
-          
+          path: extracted/MusikPlayerAndroid/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
