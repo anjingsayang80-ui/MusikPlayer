@@ -43,7 +43,7 @@ jobs:
           EOF
 
       - name: Build APK
-        run: gradle -I extracted/MusikPlayerAndroid/jvm-target.gradle -p extracted/MusikPlayerAndroid assembleDebug
+        run: gradle -I "$GITHUB_WORKSPACE/extracted/MusikPlayerAndroid/jvm-target.gradle" -p "$GITHUB_WORKSPACE/extracted/MusikPlayerAndroid" assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
