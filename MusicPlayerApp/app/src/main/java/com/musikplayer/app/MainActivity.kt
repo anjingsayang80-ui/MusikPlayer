@@ -246,7 +246,7 @@ class MainActivity : Activity() {
             fileName=fileName.replace(Regex("[^A-Za-z0-9._-]"),"_").take(100)
             if(fileName.isBlank() || fileName=="." || fileName=="..") fileName=if(video)"video.mp4" else "musik.mp3"
             if(!fileName.contains('.')) fileName+=if(video)".mp4" else ".mp3"
-            val extension=fileName.substringAfterLast("","").lowercase(java.util.Locale.ROOT)
+            val extension=fileName.substringAfterLast('.',"").lowercase(java.util.Locale.ROOT)
             val mime=when(extension) {
                 "mp3"->"audio/mpeg"
                 "m4a"->"audio/mp4"
@@ -265,9 +265,9 @@ class MainActivity : Activity() {
                 .setDescription(if(video)"Mengunduh video ke folder Movies" else "Mengunduh musik ke folder Music")
                 .setMimeType(mime)
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                .setAllowedOverMetered(true)
                 .setAllowedOverRoaming(false)
                 .setDestinationInExternalPublicDir(if(video)Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_MUSIC,fileName)
+            if(Build.VERSION.SDK_INT>=24) request.setAllowedOverMetered(true)
             val manager=getSystemService(DOWNLOAD_SERVICE) as DownloadManager
             manager.enqueue(request)
             Toast.makeText(this,"Unduhan dimulai: $fileName",Toast.LENGTH_LONG).show()
