@@ -181,7 +181,7 @@ class MainActivity : Activity() {
                 if(song.id.toString() !in hiddenIds && !uniqueSongs.containsKey(key)) uniqueSongs[key]=song
             }
         }
-        songs.addAll(uniqueSongs.values.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.title }.thenBy(String.CASE_INSENSITIVE_ORDER) { it.artist }))
+        songs.addAll(uniqueSongs.values.sortedWith(compareBy<Song> { it.title.lowercase(java.util.Locale.ROOT) }.thenBy { it.artist.lowercase(java.util.Locale.ROOT) }))
         val saved = getSharedPreferences("musik_player", MODE_PRIVATE).getString("song_order", "").orEmpty().split(",").filter { it.isNotBlank() }.mapNotNull { it.toLongOrNull() }
         if (saved.isNotEmpty()) { val byId = songs.associateBy { it.id }; val ordered = saved.mapNotNull { byId[it] }.toMutableList(); songs.filter { it.id !in saved }.forEach { ordered.add(it) }; songs.clear(); songs.addAll(ordered) }
     }
