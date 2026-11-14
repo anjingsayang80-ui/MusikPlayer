@@ -241,39 +241,92 @@ class MainActivity : Activity() {
             requestPermissions(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE),43)
             return
         }
+        if(Build.VERSION.SDK_INT>=29) {
+            Toast.makeText(this,"Memeriksa format file dari server...",Toast.LENGTH_SHORT).show()
+            Thread { downloadAndValidate(link,video) }.start()
+            return
+        }
         try {
             var fileName=Uri.decode(uri.lastPathSegment.orEmpty()).substringAfterLast('/').trim()
             fileName=fileName.replace(Regex("[^A-Za-z0-9._-]"),"_").take(100)
             if(fileName.isBlank() || fileName=="." || fileName=="..") fileName=if(video)"video.mp4" else "musik.mp3"
-            if(!fileName.contains('.')) fileName+=if(video)".mp4" else ".mp3"
-            val extension=fileName.substringAfterLast('.',"").lowercase(java.util.Locale.ROOT)
-            val mime=when(extension) {
-                "mp3"->"audio/mpeg"
-                "m4a"->"audio/mp4"
-                "aac"->"audio/aac"
-                "wav"->"audio/wav"
-                "ogg"->"audio/ogg"
-                "flac"->"audio/flac"
-                "mp4"->"video/mp4"
-                "mkv"->"video/x-matroska"
-                "webm"->"video/webm"
-                "3gp"->"video/3gpp"
-                else->if(video)"video/*" else "audio/*"
-            }
             val request=DownloadManager.Request(uri)
                 .setTitle(fileName)
                 .setDescription(if(video)"Mengunduh video ke folder Movies" else "Mengunduh musik ke folder Music")
-                .setMimeType(mime)
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 .setAllowedOverRoaming(false)
                 .setDestinationInExternalPublicDir(if(video)Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_MUSIC,fileName)
             if(Build.VERSION.SDK_INT>=24) request.setAllowedOverMetered(true)
-            val manager=getSystemService(DOWNLOAD_SERVICE) as DownloadManager
-            manager.enqueue(request)
+            (getSystemService(DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
             Toast.makeText(this,"Unduhan dimulai: $fileName",Toast.LENGTH_LONG).show()
         } catch (e:Exception) {
             Toast.makeText(this,"Gagal memulai unduhan: ${e.message ?: "periksa tautan"}",Toast.LENGTH_LONG).show()
         }
+    }
+
+    private fun downloadAndValidate(link:String, video:Boolean) {
+        var connection:java.net.HttpURLConnection?=null
+        var savedUri:Uri?=null
+        try {
+            connection=(java.net.URL(link).openConnection() as java.net.HttpURLConnection).apply {
+                instanceFollowRedirects=true
+                connectTimeout=20000
+                readTimeout=30000
+                requestMethod="GET"
+                setRequestProperty("User-Agent","Mozilla/5.0 (Linux; Android) MusikPlayer")
+            }
+            connection.connect()
+            val status=connection.responseCode
+            if(status !in 200..299) throw Exception("Server mengirim kode $status")
+            val rawType=connection.contentType?.substringBefore(';')?.trim()?.lowercase(java.util.Locale.ROOT).orEmpty()
+            val expected=if(video)"video/" else "audio/"
+            if(rawType.startsWith("text/") || rawType.contains("html") || rawType.contains("json") ||
+                (rawType.isNotBlank() && rawType!="application/octet-stream" && !rawType.startsWith(expected))) {
+                throw Exception("Tautan bukan file ${if(video)"video" else "audio"} (tipe: ${rawType.ifBlank{"tidak diketahui"}}). Gunakan tautan file langsung.")
+            }
+            val disposition=connection.getHeaderField("Content-Disposition").orEmpty()
+            val fromHeader=Regex("(?i)filename\*?=(?:UTF-8''|\")?([^;\"\r\n]+)").find(disposition)?.groupValues?.get(1)?.trim()?.trim('"')
+            val fromUrl=Uri.parse(connection.url.toString()).lastPathSegment
+            var name=(fromHeader ?: fromUrl ?: "").substringAfterLast('/').trim()
+            name=try { java.net.URLDecoder.decode(name,"UTF-8") } catch (_:Exception) { name }
+            name=name.replace(Regex("[^A-Za-z0-9._-]"),"_").take(100)
+            val extFromType=when(rawType) {
+                "audio/mpeg"->"mp3"; "audio/mp4"->"m4a"; "audio/aac"->"aac"; "audio/wav","audio/x-wav"->"wav"
+                "audio/ogg"->"ogg"; "audio/flac"->"flac"; "video/mp4"->"mp4"; "video/webm"->"webm"
+                "video/3gpp"->"3gp"; "video/x-matroska"->"mkv"; else->""
+            }
+            val currentExt=name.substringAfterLast('.', "").lowercase(java.util.Locale.ROOT)
+            if(name.isBlank() || name=="." || name==".." || currentExt.isBlank()) {
+                if(extFromType.isBlank()) throw Exception("Server tidak memberi format file. Gunakan tautan unduhan langsung.")
+                name=(name.substringBeforeLast('.',name).ifBlank { if(video)"video" else "musik" })+"."+extFromType
+            } else if(extFromType.isNotBlank() && currentExt!=extFromType && !(extFromType=="mp4" && currentExt=="m4v")) {
+                name=name.substringBeforeLast('.')+"."+extFromType
+            }
+            val mime=if(rawType.startsWith(expected)) rawType else when(name.substringAfterLast('.').lowercase()) {
+                "mp3"->"audio/mpeg"; "m4a"->"audio/mp4"; "aac"->"audio/aac"; "wav"->"audio/wav"; "ogg"->"audio/ogg"; "flac"->"audio/flac"
+                "mp4"->"video/mp4"; "webm"->"video/webm"; "3gp"->"video/3gpp"; "mkv"->"video/x-matroska"; else->throw Exception("Format file tidak dikenali")
+            }
+            val values=android.content.ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME,name)
+                put(MediaStore.MediaColumns.MIME_TYPE,mime)
+                put(MediaStore.MediaColumns.RELATIVE_PATH,if(video)Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_MUSIC)
+                put(MediaStore.MediaColumns.IS_PENDING,1)
+            }
+            val collection=if(video)MediaStore.Video.Media.EXTERNAL_CONTENT_URI else MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+            savedUri=contentResolver.insert(collection,values) ?: throw Exception("Tidak bisa membuat file tujuan")
+            val input=connection.inputStream
+            val output=contentResolver.openOutputStream(savedUri!!,"w") ?: throw Exception("Tidak bisa menyimpan file")
+            input.use { source -> output.use { target ->
+                val buffer=ByteArray(64*1024)
+                while(true) { val n=source.read(buffer); if(n<0) break; target.write(buffer,0,n) }
+                target.flush()
+            } }
+            contentResolver.update(savedUri!!,android.content.ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING,0) },null,null)
+            handler.post { Toast.makeText(this,"Berhasil diunduh: $name",Toast.LENGTH_LONG).show(); if(videoMode)renderVideos(search.text.toString()) else loadSongs() }
+        } catch(e:Exception) {
+            savedUri?.let { try { contentResolver.delete(it,null,null) } catch (_:Exception) {} }
+            handler.post { Toast.makeText(this,"Unduhan dibatalkan: ${e.message ?: "file tidak valid"}",Toast.LENGTH_LONG).show() }
+        } finally { connection?.disconnect() }
     }
 
     private fun loadSongs() {
@@ -381,7 +434,33 @@ class MainActivity : Activity() {
         val uri=ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,video.id)
         val videoView=VideoView(this)
         val frame=FrameLayout(this).apply { setBackgroundColor(Color.BLACK); isFocusable=true; isFocusableInTouchMode=true }
+        frame.clipChildren=true
+        frame.clipToPadding=true
+        videoView.pivotX=resources.displayMetrics.widthPixels/2f
+        videoView.pivotY=resources.displayMetrics.heightPixels/2f
         frame.addView(videoView,FrameLayout.LayoutParams(-1,-1))
+        var videoZoom=1f
+        fun applyVideoZoom(value:Float) {
+            videoZoom=value.coerceIn(1f,3f)
+            videoView.scaleX=videoZoom
+            videoView.scaleY=videoZoom
+        }
+        val zoomBar=LinearLayout(this).apply {
+            orientation=LinearLayout.HORIZONTAL
+            gravity=Gravity.CENTER
+            setPadding(dp(6),dp(4),dp(6),dp(4))
+            background=panelBg(Color.argb(190,18,18,26),12)
+        }
+        zoomBar.addView(centered("−",24f).apply { setPadding(dp(10),0,dp(10),0); setOnClickListener { applyVideoZoom(videoZoom-0.25f) } })
+        zoomBar.addView(centered("1×",13f,Color.WHITE,true).apply { setPadding(dp(8),0,dp(8),0); setOnClickListener { applyVideoZoom(1f) } })
+        zoomBar.addView(centered("+",24f).apply { setPadding(dp(10),0,dp(10),0); setOnClickListener { applyVideoZoom(videoZoom+0.25f) } })
+        frame.addView(zoomBar,FrameLayout.LayoutParams(-2,dp(42),Gravity.TOP or Gravity.END).apply { topMargin=dp(16); rightMargin=dp(14) })
+        val pinchZoom=android.view.ScaleGestureDetector(this,object:android.view.ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScale(detector:android.view.ScaleGestureDetector):Boolean {
+                applyVideoZoom(videoZoom*detector.scaleFactor)
+                return true
+            }
+        })
         val controller=android.widget.MediaController(this)
         controller.setAnchorView(frame)
         videoView.setMediaController(controller)
@@ -411,7 +490,7 @@ class MainActivity : Activity() {
         }
         videoView.setOnPreparedListener { mp ->
             if(Build.VERSION.SDK_INT>=21) {
-                try { mp.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING) } catch (_:Exception) {}
+                try { mp.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT) } catch (_:Exception) {}
             }
             val saved=getSharedPreferences("musik_player",MODE_PRIVATE).getInt(progressKey,0)
             if(saved in 1..99 && video.duration>0) videoView.seekTo((video.duration*saved/100).toInt())
@@ -470,7 +549,8 @@ class MainActivity : Activity() {
                     moved=false
                 }
             }
-            gesture.onTouchEvent(event)
+            pinchZoom.onTouchEvent(event)
+            if(!pinchZoom.isInProgress) gesture.onTouchEvent(event)
             true
         }
         dialog.setOnDismissListener {
