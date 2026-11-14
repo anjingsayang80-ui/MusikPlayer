@@ -19,6 +19,7 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.media.MediaPlayer
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -437,17 +438,27 @@ class MainActivity : Activity() {
 
     private fun playVideo(video:VideoItem) {
         val uri=ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,video.id)
-        // Ukur video agar seluruh gambar terlihat dan rasio aslinya tetap terjaga.
+        // Ambil ukuran asli video dari metadata; VideoView tidak membuka videoWidth/videoHeight.
+        val (sourceWidth,sourceHeight)=try {
+            val retriever=MediaMetadataRetriever()
+            try {
+                retriever.setDataSource(this,uri)
+                var w=retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+                var h=retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+                val rotation=retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+                if(rotation==90 || rotation==270) { val temp=w; w=h; h=temp }
+                Pair(w,h)
+            } finally { retriever.release() }
+        } catch (_:Exception) { Pair(0,0) }
+        // Sesuaikan ukuran tampilan agar video utuh terlihat tanpa terpotong.
         val videoView=object:VideoView(this) {
             override fun onMeasure(widthMeasureSpec:Int,heightMeasureSpec:Int) {
                 val maxW=MeasureSpec.getSize(widthMeasureSpec)
                 val maxH=MeasureSpec.getSize(heightMeasureSpec)
-                val vw=videoWidth
-                val vh=videoHeight
-                if(vw>0 && vh>0 && maxW>0 && maxH>0) {
-                    val scale=minOf(maxW.toFloat()/vw,maxH.toFloat()/vh)
-                    val fittedW=(vw*scale).toInt().coerceAtLeast(1)
-                    val fittedH=(vh*scale).toInt().coerceAtLeast(1)
+                if(sourceWidth>0 && sourceHeight>0 && maxW>0 && maxH>0) {
+                    val scale=minOf(maxW.toFloat()/sourceWidth,maxH.toFloat()/sourceHeight)
+                    val fittedW=(sourceWidth*scale).toInt().coerceAtLeast(1)
+                    val fittedH=(sourceHeight*scale).toInt().coerceAtLeast(1)
                     setMeasuredDimension(fittedW,fittedH)
                 } else {
                     setMeasuredDimension(maxW,maxH)
