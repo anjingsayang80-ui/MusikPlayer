@@ -358,12 +358,18 @@ class MainActivity : Activity() {
         val saved = getSharedPreferences("musik_player", MODE_PRIVATE).getString("song_order", "").orEmpty().split(",").filter { it.isNotBlank() }.mapNotNull { it.toLongOrNull() }
         if (saved.isNotEmpty()) { val byId = songs.associateBy { it.id }; val ordered = saved.mapNotNull { byId[it] }.toMutableList(); songs.filter { it.id !in saved }.forEach { ordered.add(it) }; songs.clear(); songs.addAll(ordered) }
     }
+    private fun saveSongOrder() {
+        // Tulis urutan secara sinkron agar perubahan tidak hilang saat daftar segera dirender/aktivitas dibuat ulang.
+        getSharedPreferences("musik_player", MODE_PRIVATE).edit()
+            .putString("song_order", songs.joinToString(",") { it.id.toString() })
+            .commit()
+    }
     private fun moveSongToFirst(song:Song) {
         val from=songs.indexOf(song)
         if(from<=0) return
         val item=songs.removeAt(from)
         songs.add(0,item)
-        getSharedPreferences("musik_player",MODE_PRIVATE).edit().putString("song_order",songs.joinToString(","){it.id.toString()}).apply()
+        saveSongOrder()
         renderSongs(search.text.toString())
         if(::musicScroll.isInitialized) musicScroll.post {
             musicScroll.smoothScrollTo(0,0)
@@ -375,7 +381,7 @@ class MainActivity : Activity() {
         val to=from+delta
         if(from !in songs.indices || to !in songs.indices) return
         val item=songs.removeAt(from); songs.add(to,item)
-        getSharedPreferences("musik_player", MODE_PRIVATE).edit().putString("song_order",songs.joinToString(","){it.id.toString()}).apply()
+        saveSongOrder()
         renderSongs(search.text.toString())
         Toast.makeText(this,"Urutan lagu disimpan",Toast.LENGTH_SHORT).show()
     }
@@ -739,7 +745,7 @@ class MainActivity : Activity() {
                         val to=songs.indexOf(song)
                         if(from>=0 && to>=0 && from!=to){
                             val moving=songs.removeAt(from); songs.add(to,moving)
-                            getSharedPreferences("musik_player",MODE_PRIVATE).edit().putString("song_order",songs.joinToString(","){it.id.toString()}).apply()
+                            saveSongOrder()
                             renderSongs(search.text.toString())
                             Toast.makeText(this@MainActivity,"Lagu dipindahkan",Toast.LENGTH_SHORT).show()
                         }
@@ -889,7 +895,7 @@ class MainActivity : Activity() {
         hidden.add(song.id.toString())
         prefs.edit().putStringSet("hidden_song_ids",hidden).apply()
         songs.removeAll { it.id==song.id }
-        prefs.edit().putString("song_order",songs.joinToString(","){it.id.toString()}).apply()
+        saveSongOrder()
         if(::listBox.isInitialized) renderSongs(search.text.toString())
     }
 
