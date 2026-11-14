@@ -437,16 +437,33 @@ class MainActivity : Activity() {
 
     private fun playVideo(video:VideoItem) {
         val uri=ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,video.id)
-        val videoView=VideoView(this)
+        // Ukur video agar seluruh gambar terlihat dan rasio aslinya tetap terjaga.
+        val videoView=object:VideoView(this) {
+            override fun onMeasure(widthMeasureSpec:Int,heightMeasureSpec:Int) {
+                val maxW=MeasureSpec.getSize(widthMeasureSpec)
+                val maxH=MeasureSpec.getSize(heightMeasureSpec)
+                val vw=videoWidth
+                val vh=videoHeight
+                if(vw>0 && vh>0 && maxW>0 && maxH>0) {
+                    val scale=minOf(maxW.toFloat()/vw,maxH.toFloat()/vh)
+                    val fittedW=(vw*scale).toInt().coerceAtLeast(1)
+                    val fittedH=(vh*scale).toInt().coerceAtLeast(1)
+                    setMeasuredDimension(fittedW,fittedH)
+                } else {
+                    setMeasuredDimension(maxW,maxH)
+                }
+            }
+        }
         val frame=FrameLayout(this).apply { setBackgroundColor(Color.BLACK); isFocusable=true; isFocusableInTouchMode=true }
         frame.clipChildren=true
         frame.clipToPadding=true
-        videoView.pivotX=resources.displayMetrics.widthPixels/2f
-        videoView.pivotY=resources.displayMetrics.heightPixels/2f
-        frame.addView(videoView,FrameLayout.LayoutParams(-1,-1))
+        frame.addView(videoView,FrameLayout.LayoutParams(-2,-2,Gravity.CENTER))
         var videoZoom=1f
         fun applyVideoZoom(value:Float) {
             videoZoom=value.coerceIn(1f,3f)
+            // Perbesar dari titik tengah video, bukan dari titik tengah layar.
+            videoView.pivotX=videoView.width/2f
+            videoView.pivotY=videoView.height/2f
             videoView.scaleX=videoZoom
             videoView.scaleY=videoZoom
         }
