@@ -44,6 +44,7 @@ class MainActivity : Activity() {
     private lateinit var miniPlay: TextView
     private lateinit var miniArt: ImageView
     private lateinit var listBox: LinearLayout
+    private lateinit var musicScroll: ScrollView
     private lateinit var search: EditText
     private lateinit var playAllButton: TextView
     private var videoMode = false
@@ -146,9 +147,9 @@ class MainActivity : Activity() {
         actions.addView(centered("♫ Bass",12f,accent,true).apply { setOnClickListener { showBassSettings() } },LinearLayout.LayoutParams(dp(72),dp(44)))
         section.addView(actions); root.addView(section)
 
-        val scroll=ScrollView(this).apply { clipToPadding=false; setPadding(0,0,0,dp(8)) }
+        musicScroll=ScrollView(this).apply { clipToPadding=false; setPadding(0,0,0,dp(8)) }
         listBox=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),0,dp(16),dp(8)) }
-        scroll.addView(listBox); root.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
+        musicScroll.addView(listBox); root.addView(musicScroll,LinearLayout.LayoutParams(-1,0,1f))
 
         val mini=LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL; setPadding(dp(10),dp(7),dp(10),dp(7)); background=panelBg(Color.rgb(31,29,43),15); setOnClickListener { showNowPlaying() } }
         miniArt=ImageView(this).apply { scaleType=ImageView.ScaleType.CENTER_CROP; setImageResource(R.drawable.app_icon); background=panelBg(); clipToOutline=true }
@@ -195,6 +196,7 @@ class MainActivity : Activity() {
         songs.add(0,item)
         getSharedPreferences("musik_player",MODE_PRIVATE).edit().putString("song_order",songs.joinToString(","){it.id.toString()}).apply()
         renderSongs(search.text.toString())
+        if(::musicScroll.isInitialized) musicScroll.post { musicScroll.smoothScrollTo(0,0) }
         Toast.makeText(this,"Lagu dipindahkan ke urutan pertama",Toast.LENGTH_SHORT).show()
     }
     private fun moveSong(from:Int, delta:Int) {
