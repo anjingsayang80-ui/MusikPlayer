@@ -29,7 +29,29 @@ class PlaybackService : Service() {
             .setOngoing(true)
             .build()
         startForeground(78, notification)
-        return START_STICKY
+        return START_NOT_STICKY
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        stopRetainedPlayback()
+        stopForeground(true)
+        stopSelf()
+        super.onTaskRemoved(rootIntent)
+    }
+
+    override fun onDestroy() {
+        stopRetainedPlayback()
+        super.onDestroy()
+    }
+
+    private fun stopRetainedPlayback() {
+        val active=retainedPlayer
+        retainedPlayer=null
+        try {
+            active?.setOnCompletionListener(null)
+            active?.setOnErrorListener(null)
+            active?.release()
+        } catch (_: Exception) {}
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
