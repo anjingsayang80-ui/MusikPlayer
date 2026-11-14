@@ -208,51 +208,74 @@ class MainActivity : Activity() {
         if(!::listBox.isInitialized) return
         listBox.removeAllViews()
         sectionTitle.text="Telah diunduh"
-        val videos=mutableListOf<VideoItem>()
-        val cols=arrayOf(MediaStore.Video.Media._ID,MediaStore.Video.Media.TITLE,MediaStore.Video.Media.DURATION,MediaStore.Video.Media.SIZE)
-        contentResolver.query(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,cols,null,null,MediaStore.Video.Media.TITLE+" COLLATE NOCASE ASC")?.use { c ->
-            val id=c.getColumnIndexOrThrow(MediaStore.Video.Media._ID); val title=c.getColumnIndexOrThrow(MediaStore.Video.Media.TITLE)
-            val duration=c.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION); val size=c.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE)
-            while(c.moveToNext()) videos.add(VideoItem(c.getLong(id),c.getString(title)?:"Video tanpa judul",c.getLong(duration),c.getLong(size)))
-        }
-        val shown=videos.filter { it.title.contains(filter,true) }
-        count.text=shown.size.toString()+" video ditemukan"
-        if(shown.isEmpty()){ listBox.addView(centered("Belum ada video di HP",14f,muted).apply{setPadding(0,dp(40),0,dp(40))}); return }
-        shown.forEach { video ->
-            val row=LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL; setPadding(dp(10),dp(10),dp(10),dp(10)); background=panelBg() }
-            val videoUri=ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,video.id)
-            val thumbnail=ImageView(this).apply {
-                scaleType=ImageView.ScaleType.CENTER_CROP
-                background=panelBg(Color.rgb(40,35,55),8)
-                clipToOutline=true
-                try {
-                    setImageBitmap(if(Build.VERSION.SDK_INT>=29) contentResolver.loadThumbnail(videoUri,Size(dp(150),dp(100)),null)
-                    else MediaStore.Video.Thumbnails.getThumbnail(contentResolver,video.id,MediaStore.Video.Thumbnails.MINI_KIND,null))
-                } catch (_:Exception) { setImageResource(R.drawable.app_icon) }
+        count.text="Memuat video..."
+        Thread {
+            val videos=mutableListOf<VideoItem>()
+            val cols=arrayOf(MediaStore.Video.Media._ID,MediaStore.Video.Media.TITLE,MediaStore.Video.Media.DURATION,MediaStore.Video.Media.SIZE)
+            try {
+                contentResolver.query(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,cols,null,null,MediaStore.Video.Media.TITLE+" COLLATE NOCASE ASC")?.use { cur ->
+                    val id=cur.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
+                    val title=cur.getColumnIndexOrThrow(MediaStore.Video.Media.TITLE)
+                    val duration=cur.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION)
+                    val size=cur.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE)
+                    while(cur.moveToNext()) videos.add(VideoItem(cur.getLong(id),cur.getString(title)?:"Video tanpa judul",cur.getLong(duration),cur.getLong(size)))
+                }
+            } catch (_:Exception) {}
+            val shown=videos.filter { it.title.contains(filter,true) }
+            handler.post {
+                if(!videoMode || !::listBox.isInitialized) return@post
+                listBox.removeAllViews()
+                count.text=shown.size.toString()+" video ditemukan"
+                if(shown.isEmpty()) {
+                    listBox.addView(centered("Belum ada video di HP",14f,muted).apply{setPadding(0,dp(40),0,dp(40))})
+                    return@post
+                }
+                shown.forEach { video ->
+                    val row=LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL; setPadding(dp(10),dp(10),dp(10),dp(10)); background=panelBg() }
+                    val thumbnail=ImageView(this).apply {
+                        scaleType=ImageView.ScaleType.CENTER_CROP
+                        background=panelBg(Color.rgb(40,35,55),8)
+                        clipToOutline=true
+                        setImageResource(R.drawable.app_icon)
+                        tag=video.id
+                    }
+                    row.addView(thumbnail,LinearLayout.LayoutParams(dp(112),dp(76)))
+                    val info=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),0,0,0) }
+                    info.addView(label(video.title,14f,Color.WHITE,true).apply{maxLines=2;ellipsize=android.text.TextUtils.TruncateAt.END})
+                    info.addView(label(sizeLabel(video.size),11f,muted).apply{setPadding(0,dp(4),0,0)})
+                    val watched=getSharedPreferences("musik_player",MODE_PRIVATE).getInt("video_progress_${video.id}",0)
+                    info.addView(label("$watched% menonton",11f,muted).apply{setPadding(0,dp(5),0,0)})
+                    row.addView(info,LinearLayout.LayoutParams(0,-2,1f))
+                    row.setOnClickListener{playVideo(video)}
+                    val lp=LinearLayout.LayoutParams(-1,dp(96));lp.bottomMargin=dp(10);listBox.addView(row,lp)
+                    Thread {
+                        try {
+                            val videoUri=ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,video.id)
+                            val bmp=if(Build.VERSION.SDK_INT>=29) contentResolver.loadThumbnail(videoUri,Size(dp(150),dp(100)),null)
+                            else MediaStore.Video.Thumbnails.getThumbnail(contentResolver,video.id,MediaStore.Video.Thumbnails.MINI_KIND,null)
+                            handler.post { if(thumbnail.tag==video.id && bmp!=null) thumbnail.setImageBitmap(bmp) }
+                        } catch (_:Exception) {}
+                    }.start()
+                }
             }
-            row.addView(thumbnail,LinearLayout.LayoutParams(dp(112),dp(76)))
-            val info=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),0,0,0) }
-            info.addView(label(video.title,14f,Color.WHITE,true).apply{maxLines=2;ellipsize=android.text.TextUtils.TruncateAt.END})
-            info.addView(label(sizeLabel(video.size),11f,muted).apply{setPadding(0,dp(4),0,0)})
-            val watched=getSharedPreferences("musik_player",MODE_PRIVATE).getInt("video_progress_${video.id}",0)
-            info.addView(label("$watched% menonton",11f,muted).apply{setPadding(0,dp(5),0,0)})
-            row.addView(info,LinearLayout.LayoutParams(0,-2,1f)); row.setOnClickListener{playVideo(video)}
-            val lp=LinearLayout.LayoutParams(-1,dp(96));lp.bottomMargin=dp(10);listBox.addView(row,lp)
-        }
+        }.start()
     }
+
     private fun playVideo(video:VideoItem) {
         val uri=ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,video.id)
         val videoView=VideoView(this)
-        val frame=FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
+        val frame=FrameLayout(this).apply { setBackgroundColor(Color.BLACK); isFocusable=true; isFocusableInTouchMode=true }
         frame.addView(videoView,FrameLayout.LayoutParams(-1,-1))
         val controller=android.widget.MediaController(this)
         controller.setAnchorView(frame)
         videoView.setMediaController(controller)
-        val dialog=AlertDialog.Builder(this).setView(frame).create()
-        dialog.window?.setBackgroundDrawableResource(android.R.color.black)
-        dialog.setOnShowListener {
-            dialog.window?.setLayout(-1,-1)
-            dialog.window?.setFlags(android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN,android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN)
+        val dialog=android.app.Dialog(this,android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+        dialog.setContentView(frame)
+        dialog.window?.apply {
+            setBackgroundDrawableResource(android.R.color.black)
+            setLayout(-1,-1)
+            addFlags(android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN)
+            addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
         val progressKey="video_progress_${video.id}"
         var saveProgress:Runnable?=null
@@ -277,44 +300,48 @@ class MainActivity : Activity() {
             getSharedPreferences("musik_player",MODE_PRIVATE).edit().putInt(progressKey,100).apply()
             videoView.seekTo(0)
         }
-        var tapCount=0
-        var tapSide=0
-        val tapAction=Runnable {
-            val amount=when(tapCount){1->0;2->20000;else->30000}
-            if(amount>0) {
-                val target=(videoView.currentPosition+(if(tapSide==1) -amount else amount)).coerceIn(0,videoView.duration.coerceAtLeast(0))
+        var lastSeekPosition=0
+        var longPressHandled=false
+        val gesture=android.view.GestureDetector(this,object:android.view.GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e:android.view.MotionEvent)=true
+            override fun onSingleTapConfirmed(e:android.view.MotionEvent):Boolean {
+                if(controller.isShowing) controller.hide() else controller.show(3000)
+                return true
+            }
+            override fun onDoubleTap(e:android.view.MotionEvent):Boolean {
+                val jump=if(e.x<videoView.width/2) -20000 else 20000
+                val target=(videoView.currentPosition+jump).coerceIn(0,videoView.duration.coerceAtLeast(0))
                 videoView.seekTo(target)
-                Toast.makeText(this,if(tapSide==1)"Mundur ${amount/1000} detik" else "Maju ${amount/1000} detik",Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@MainActivity,if(jump<0)"Mundur 20 detik" else "Maju 20 detik",Toast.LENGTH_SHORT).show()
+                return true
             }
-            tapCount=0
-        }
-        videoView.setOnTouchListener { view,event ->
-            when(event.action) {
-                android.view.MotionEvent.ACTION_DOWN -> { view.tag=System.currentTimeMillis(); false }
-                android.view.MotionEvent.ACTION_UP -> {
-                    val started=view.tag as? Long ?: 0L
-                    val elapsed=System.currentTimeMillis()-started
-                    val side=if(event.x<view.width/2)1 else 2
-                    if(elapsed>=550) {
-                        tapCount=0
-                        val jump=10000
-                        val target=(videoView.currentPosition+(if(side==1)-jump else jump)).coerceIn(0,videoView.duration.coerceAtLeast(0))
-                        videoView.seekTo(target)
-                        Toast.makeText(this,if(side==1)"Mundur 10 detik" else "Maju 10 detik",Toast.LENGTH_SHORT).show()
-                    } else {
-                        if(tapCount==0 || tapSide!=side) { tapCount=1; tapSide=side } else tapCount++
-                        handler.removeCallbacks(tapAction)
-                        handler.postDelayed(tapAction,350)
-                    }
-                    false
-                }
-                else -> false
+            override fun onLongPress(e:android.view.MotionEvent) {
+                val jump=if(e.x<videoView.width/2) -10000 else 10000
+                videoView.seekTo((videoView.currentPosition+jump).coerceIn(0,videoView.duration.coerceAtLeast(0)))
+                longPressHandled=true
+                Toast.makeText(this@MainActivity,if(jump<0)"Mundur 10 detik" else "Maju 10 detik",Toast.LENGTH_SHORT).show()
             }
+            override fun onScroll(e1:android.view.MotionEvent?,e2:android.view.MotionEvent,dx:Float,dy:Float):Boolean {
+                if(e1==null || kotlin.math.abs(e2.x-e1.x)<dp(12)) return false
+                val delta=(-(e2.x-e1.x)*250).toInt()
+                val target=(lastSeekPosition+delta).coerceIn(0,videoView.duration.coerceAtLeast(0))
+                videoView.seekTo(target)
+                return true
+            }
+        })
+        videoView.setOnTouchListener { _,event ->
+            if(event.action==android.view.MotionEvent.ACTION_DOWN) {
+                lastSeekPosition=videoView.currentPosition
+                longPressHandled=false
+            }
+            gesture.onTouchEvent(event)
+            if(event.action==android.view.MotionEvent.ACTION_UP && !longPressHandled) {
+                // GestureDetector menangani ketuk tunggal, ketuk dua kali, dan seret.
+            }
+            true
         }
-        videoView.setVideoURI(uri)
         dialog.setOnDismissListener {
             saveProgress?.let{handler.removeCallbacks(it)}
-            handler.removeCallbacks(tapAction)
             if(video.duration>0 && videoView.currentPosition>0 && videoView.currentPosition<video.duration) {
                 val percent=(videoView.currentPosition*100L/video.duration).toInt().coerceIn(0,99)
                 getSharedPreferences("musik_player",MODE_PRIVATE).edit().putInt(progressKey,percent).apply()
@@ -322,6 +349,11 @@ class MainActivity : Activity() {
             videoView.stopPlayback()
         }
         dialog.show()
+        dialog.window?.apply {
+            setLayout(-1,-1)
+            addFlags(android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN)
+            addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
     }
     private fun renderSongs(filter:String) {
         if(!::listBox.isInitialized)return
@@ -562,10 +594,15 @@ class MainActivity : Activity() {
             bassBoost?.release()
             val prefs=getSharedPreferences("musik_player",MODE_PRIVATE)
             val strength=prefs.getInt("bass_strength",700).coerceIn(0,1000)
-            bassBoost=android.media.audiofx.BassBoost(0,sessionId).apply {
-                setStrength(strength.toShort())
-                enabled=prefs.getBoolean("bass_enabled",true) && strength>0
+            val effect=android.media.audiofx.BassBoost(0,sessionId)
+            if(!effect.hasControl()) {
+                effect.release()
+                bassBoost=null
+                return
             }
+            effect.setStrength(strength.toShort())
+            effect.enabled=prefs.getBoolean("bass_enabled",true) && strength>0
+            bassBoost=effect
         } catch (_:Exception) { bassBoost=null }
     }
 
@@ -589,7 +626,14 @@ class MainActivity : Activity() {
                 if(player!=null) {
                     val effect=bassBoost
                     if(effect==null) setupBassBoost(player!!.audioSessionId)
-                    else { effect.setStrength(strength.toShort()); effect.enabled=on }
+                    else {
+                        if(effect.hasControl()) {
+                            effect.setStrength(strength.toShort())
+                            effect.enabled=on
+                        } else Toast.makeText(this,"Efek bass sedang dikendalikan sistem audio",Toast.LENGTH_SHORT).show()
+                    }
+                } else {
+                    Toast.makeText(this,"Putar musik dulu agar efek bass bisa diterapkan",Toast.LENGTH_SHORT).show()
                 }
             } catch (_:Exception) { Toast.makeText(this,"Perangkat tidak mendukung efek Bass Boost ini",Toast.LENGTH_SHORT).show() }
         }
