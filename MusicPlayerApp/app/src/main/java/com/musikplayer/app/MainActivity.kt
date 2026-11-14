@@ -35,6 +35,7 @@ class MainActivity : Activity() {
     private val songs = mutableListOf<Song>()
     private var player: MediaPlayer? = null
     private var bassBoost: android.media.audiofx.BassBoost? = null
+    private var bassEqualizer: android.media.audiofx.Equalizer? = null
     private var playerVolume = 1.0f
     private var current = -1
     private lateinit var count: TextView
@@ -561,6 +562,7 @@ class MainActivity : Activity() {
         current=nextIndex
         try {
             bassBoost?.release(); bassBoost = null
+            bassEqualizer?.release(); bassEqualizer = null
             player?.release()
             player=null
             val serviceIntent = Intent(this, PlaybackService::class.java)
@@ -624,21 +626,70 @@ class MainActivity : Activity() {
         try {
             bassBoost?.release()
             bassBoost=null
+            bassEqualizer?.release()
+            bassEqualizer=null
             if(sessionId<=0) return
             val prefs=getSharedPreferences("musik_player",MODE_PRIVATE)
             val strength=prefs.getInt("bass_strength",700).coerceIn(0,1000)
-            val effect=android.media.audiofx.BassBoost(0,sessionId)
-            if(!effect.hasControl()) {
-                effect.release()
-                return
+            val enabled=prefs.getBoolean("bass_enabled",true) && strength>0
+            try {
+                val effect=android.media.audiofx.BassBoost(0,sessionId)
+                if(effect.hasControl()) {
+                    effect.setStrength(strength.toShort())
+                    effect.enabled=enabled
+                    bassBoost=effect
+                } else effect.release()
+            } catch (_:Exception) {}
+            try {
+                val eq=android.media.audiofx.Equalizer(0,sessionId)
+                if(eq.hasControl() && eq.numberOfBands>0) {
+                    val range=eq.bandLevelRange
+                    val maxBoost=range[1].toInt().coerceAtLeast(0)
+                    val boost=(maxBoost*(strength/1000f)).toInt().coerceIn(0,maxBoost).toShort()
+                    for(i in 0 until eq.numberOfBands.toInt()) {
+                        val band=i.toShort()
+                        if(eq.getCenterFreq(band) in 20..250) eq.setBandLevel(band,if(enabled) boost else 0)
+                    }
+                    eq.enabled=enabled
+                    bassEqualizer=eq
+                } else eq.release()
+            } catch (_:Exception) {}
+            if(bassBoost==null && bassEqualizer==null) {
+                Toast.makeText(this,"Efek bass tidak didukung oleh sistem audio HP ini",Toast.LENGTH_LONG).show()
             }
-            effect.setStrength(strength.toShort())
-            effect.setEnabled(prefs.getBoolean("bass_enabled",true) && strength>0)
-            bassBoost=effect
         } catch (_:Exception) {
-            bassBoost?.release()
+            try { bassBoost?.release() } catch (_:Exception) {}
+            try { bassEqualizer?.release() } catch (_:Exception) {}
             bassBoost=null
+            bassEqualizer=null
         }
+    }
+
+    private fun applyBassSettings(enabled:Boolean,strength:Int) {
+        val amount=strength.coerceIn(0,1000)
+        val active=enabled && amount>0
+        try {
+            bassBoost?.let {
+                if(it.hasControl()) {
+                    it.setStrength(amount.toShort())
+                    it.enabled=active
+                }
+            }
+        } catch (_:Exception) {}
+        try {
+            bassEqualizer?.let { eq ->
+                if(eq.hasControl()) {
+                    val range=eq.bandLevelRange
+                    val maxBoost=range[1].toInt().coerceAtLeast(0)
+                    val boost=(maxBoost*(amount/1000f)).toInt().coerceIn(0,maxBoost).toShort()
+                    for(i in 0 until eq.numberOfBands.toInt()) {
+                        val band=i.toShort()
+                        if(eq.getCenterFreq(band) in 20..250) eq.setBandLevel(band,if(active) boost else 0)
+                    }
+                    eq.enabled=active
+                }
+            }
+        } catch (_:Exception) {}
     }
 
     private fun showBassSettings() {
@@ -657,19 +708,14 @@ class MainActivity : Activity() {
             val on=enabled.isChecked && strength>0
             prefs.edit().putInt("bass_strength",strength).putBoolean("bass_enabled",enabled.isChecked).apply()
             value.text="${strength/10}%"
-            try {
-                if(player!=null) {
-                    val effect=bassBoost
-                    if(effect==null || !effect.hasControl()) {
-                        setupBassBoost(player!!.audioSessionId)
-                    } else {
-                        effect.setStrength(strength.toShort())
-                        effect.setEnabled(on)
-                    }
-                } else {
-                    Toast.makeText(this,"Putar musik dulu agar efek bass bisa diterapkan",Toast.LENGTH_SHORT).show()
-                }
-            } catch (_:Exception) { Toast.makeText(this,"Perangkat tidak mendukung efek Bass Boost ini",Toast.LENGTH_SHORT).show() }
+            if(player!=null) {
+                if(bassBoost==null && bassEqualizer==null) setupBassBoost(player!!.audioSessionId)
+                applyBassSettings(enabled.isChecked,strength)
+                if(bassBoost==null && bassEqualizer==null)
+                    Toast.makeText(this,"HP tidak menyediakan efek bass untuk sesi audio ini",Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this,"Putar musik dulu agar efek bass bisa diterapkan",Toast.LENGTH_SHORT).show()
+            }
         }
         enabled.setOnCheckedChangeListener { _,_->applyBass() }
         seek.setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener {
@@ -726,7 +772,9 @@ class MainActivity : Activity() {
                     if(fromUser){
                         bassValue.text="${progress/10}%"
                         getSharedPreferences("musik_player",MODE_PRIVATE).edit().putInt("bass_strength",progress).apply()
-                        try{bassBoost?.setStrength(progress.toShort());bassBoost?.enabled=progress>0}catch(_:Exception){}
+                        val bassOn=getSharedPreferences("musik_player",MODE_PRIVATE).getBoolean("bass_enabled",true)
+                        if(bassBoost==null && bassEqualizer==null && player!=null) setupBassBoost(player!!.audioSessionId)
+                        applyBassSettings(bassOn,progress)
                     }
                 }
                 override fun onStartTrackingTouch(seekBar:SeekBar?){}
@@ -810,5 +858,5 @@ class MainActivity : Activity() {
 
     private fun clock(ms:Long)=String.format("%d:%02d",TimeUnit.MILLISECONDS.toMinutes(ms),TimeUnit.MILLISECONDS.toSeconds(ms)%60)
     private fun sizeLabel(bytes:Long)=if(bytes>=1048576)String.format("%.1f MB",bytes/1048576.0) else (bytes/1024).toString()+" KB"
-    override fun onDestroy(){ticker?.let{handler.removeCallbacks(it)};bassBoost?.release();bassBoost=null;if(player?.isPlaying!=true){player?.release();player=null;PlaybackService.retainedPlayer=null};mediaSession?.isActive=false;mediaSession?.release();mediaSession=null;super.onDestroy()}
+    override fun onDestroy(){ticker?.let{handler.removeCallbacks(it)};bassBoost?.release();bassBoost=null;bassEqualizer?.release();bassEqualizer=null;if(player?.isPlaying!=true){player?.release();player=null;PlaybackService.retainedPlayer=null};mediaSession?.isActive=false;mediaSession?.release();mediaSession=null;super.onDestroy()}
 }
