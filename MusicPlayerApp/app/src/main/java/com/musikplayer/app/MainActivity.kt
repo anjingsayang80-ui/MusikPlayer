@@ -761,27 +761,34 @@ class MainActivity : Activity() {
                 }
             },LinearLayout.LayoutParams(dp(38),dp(38)))
             row.addView(centered("⋮",22f).apply{setOnClickListener{AlertDialog.Builder(this@MainActivity).setTitle(song.title).setItems(arrayOf("Putar sekarang","Tambah ke daftar putar","Pindahkan ke urutan pertama","Hapus dari daftar aplikasi","Hapus lagu dari HP")){_,which->val pos=songs.indexOf(song);when(which){0->{playbackQueue=selectedPlaylistName?.let{playlistMap()[it]?.toMutableList()};playSong(pos)};1->addSongToPlaylist(song);2->moveSongToFirst(song);3->hideSongFromLibrary(song);4->confirmDeleteSong(song)}}.show()}},LinearLayout.LayoutParams(dp(30),dp(52)))
-            row.setOnLongClickListener {
-                val clip=android.content.ClipData.newPlainText("song_id",song.id.toString())
-                if(Build.VERSION.SDK_INT>=24) row.startDragAndDrop(clip,android.view.View.DragShadowBuilder(row),song,0)
-                else { row.startDrag(clip,android.view.View.DragShadowBuilder(row),song,0) }
-                true
+            // Pegangan khusus agar pengguna tahu bagian yang harus ditahan untuk menyeret lagu.
+            val dragHandle=centered("⠿",24f,accent,true).apply {
+                contentDescription="Tahan lalu seret untuk mengubah urutan lagu"
+                setOnLongClickListener {
+                    val clip=android.content.ClipData.newPlainText("song_id",song.id.toString())
+                    val shadow=android.view.View.DragShadowBuilder(row)
+                    if(Build.VERSION.SDK_INT>=24) row.startDragAndDrop(clip,shadow,song.id,android.view.View.DRAG_FLAG_GLOBAL)
+                    else row.startDrag(clip,shadow,song.id,0)
+                }
             }
+            row.addView(dragHandle,LinearLayout.LayoutParams(dp(34),dp(52)))
             row.setOnDragListener { target,event ->
                 when(event.action){
-                    android.view.DragEvent.ACTION_DRAG_STARTED -> true
+                    android.view.DragEvent.ACTION_DRAG_STARTED -> event.clipDescription?.hasMimeType("text/plain") == true
                     android.view.DragEvent.ACTION_DRAG_ENTERED -> { target.alpha=0.65f; true }
                     android.view.DragEvent.ACTION_DRAG_EXITED -> { target.alpha=1f; true }
                     android.view.DragEvent.ACTION_DROP -> {
                         target.alpha=1f
-                        val draggedId=event.clipData.getItemAt(0).text.toString().toLongOrNull()
+                        val draggedId=(event.localState as? Long)
+                            ?: event.clipData?.getItemAt(0)?.text?.toString()?.toLongOrNull()
                         val from=songs.indexOfFirst{it.id==draggedId}
                         val to=songs.indexOf(song)
                         if(from>=0 && to>=0 && from!=to){
-                            val moving=songs.removeAt(from); songs.add(to,moving)
+                            val moving=songs.removeAt(from)
+                            songs.add(to.coerceAtMost(songs.size),moving)
                             saveSongOrder()
                             renderSongs(search.text.toString())
-                            Toast.makeText(this@MainActivity,"Lagu dipindahkan",Toast.LENGTH_SHORT).show()
+                            Toast.makeText(this@MainActivity,"Lagu dipindahkan ke nomor ${songs.indexOf(moving)+1}",Toast.LENGTH_SHORT).show()
                         }
                         true
                     }
