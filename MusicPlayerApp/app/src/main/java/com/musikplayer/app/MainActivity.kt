@@ -177,8 +177,10 @@ class MainActivity : Activity() {
             while(c.moveToNext()) {
                 val song=Song(c.getLong(id),c.getString(title)?:"Tanpa judul",c.getString(artist)?:"Artis tidak diketahui",c.getLong(album),c.getLong(duration),c.getLong(size))
                 val path=if(data>=0) c.getString(data)?.trim()?.lowercase().orEmpty() else ""
-                val key=if(path.isNotBlank()) path else "${song.title.trim().lowercase()}|${song.artist.trim().lowercase()}|${song.duration}|${song.size}"
-                if(song.id.toString() !in hiddenIds && !uniqueSongs.containsKey(key)) uniqueSongs[key]=song
+                val normalizedTitle=song.title.trim().lowercase(java.util.Locale.ROOT)
+                val normalizedArtist=song.artist.trim().lowercase(java.util.Locale.ROOT)
+                val key="${normalizedTitle}|${normalizedArtist}|${song.duration}|${song.size}"
+                if(song.duration>0L && song.size>0L && song.id.toString() !in hiddenIds && !uniqueSongs.containsKey(key)) uniqueSongs[key]=song
             }
         }
         songs.addAll(uniqueSongs.values.sortedWith(compareBy<Song> { it.title.lowercase(java.util.Locale.ROOT) }.thenBy { it.artist.lowercase(java.util.Locale.ROOT) }))
@@ -472,6 +474,16 @@ class MainActivity : Activity() {
         return null
     }
 
+    private fun markSongUnplayable(song:Song) {
+        val prefs=getSharedPreferences("musik_player",MODE_PRIVATE)
+        val hidden=prefs.getStringSet("hidden_song_ids",emptySet()).orEmpty().toMutableSet()
+        hidden.add(song.id.toString())
+        prefs.edit().putStringSet("hidden_song_ids",hidden).apply()
+        songs.removeAll { it.id==song.id }
+        prefs.edit().putString("song_order",songs.joinToString(","){it.id.toString()}).apply()
+        if(::listBox.isInitialized) renderSongs(search.text.toString())
+    }
+
     private fun playSong(index:Int, failedAttempts:Int=0) {
         if(songs.isEmpty())return
         if(failedAttempts>=songs.size) {
@@ -500,16 +512,28 @@ class MainActivity : Activity() {
             }
             newPlayer.setOnErrorListener{mp,_,_->
                 if(player===mp) {
+                    val failedSong=songs.getOrNull(current)
                     player=null
                     PlaybackService.retainedPlayer = null
                     mp.release()
-                    playSong((current+1)%songs.size,failedAttempts+1)
+                    if(failedSong!=null) markSongUnplayable(failedSong)
+                    if(songs.isNotEmpty()) playSong(current.coerceAtLeast(0)%songs.size,failedAttempts+1)
+                    else { miniPlay.text="▶"; nowTitle.text="Tidak ada lagu yang bisa diputar" }
                 }
                 true
             }
             newPlayer.setOnPreparedListener{mp->
                 if(player!==mp) {
                     mp.release()
+                    return@setOnPreparedListener
+                }
+                if(mp.duration<=0) {
+                    val badSong=songs.getOrNull(current)
+                    player=null
+                    PlaybackService.retainedPlayer=null
+                    mp.release()
+                    if(badSong!=null) markSongUnplayable(badSong)
+                    if(songs.isNotEmpty()) playSong(current.coerceAtLeast(0)%songs.size,failedAttempts+1)
                     return@setOnPreparedListener
                 }
                 mp.setVolume(playerVolume,playerVolume)
@@ -524,9 +548,13 @@ class MainActivity : Activity() {
             updateMediaNotification(false)
             newPlayer.prepareAsync()
         }catch(_:Exception) {
+            val badSong=songs.getOrNull(nextIndex)
             player?.release()
             player=null
-            playSong((nextIndex+1)%songs.size,failedAttempts+1)
+            PlaybackService.retainedPlayer=null
+            if(badSong!=null) markSongUnplayable(badSong)
+            if(songs.isNotEmpty()) playSong(nextIndex.coerceAtLeast(0)%songs.size,failedAttempts+1)
+            else { miniPlay.text="▶"; nowTitle.text="Tidak ada lagu yang bisa diputar" }
         }
     }
     private fun setupBassBoost(sessionId:Int) {
