@@ -333,9 +333,12 @@ class MainActivity : Activity() {
             bassBoost?.release(); bassBoost = null
             player?.release()
             player=null
+            val serviceIntent = Intent(this, PlaybackService::class.java)
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(serviceIntent) else startService(serviceIntent)
             val s=songs[nextIndex]
             val newPlayer=MediaPlayer()
             player=newPlayer
+            PlaybackService.retainedPlayer = newPlayer
             newPlayer.setDataSource(this,ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,s.id))
             newPlayer.setOnCompletionListener{mp->
                 if(player===mp) playSong((current+1)%songs.size)
@@ -343,6 +346,7 @@ class MainActivity : Activity() {
             newPlayer.setOnErrorListener{mp,_,_->
                 if(player===mp) {
                     player=null
+                    PlaybackService.retainedPlayer = null
                     mp.release()
                     playSong((current+1)%songs.size,failedAttempts+1)
                 }
@@ -514,5 +518,5 @@ class MainActivity : Activity() {
 
     private fun clock(ms:Long)=String.format("%d:%02d",TimeUnit.MILLISECONDS.toMinutes(ms),TimeUnit.MILLISECONDS.toSeconds(ms)%60)
     private fun sizeLabel(bytes:Long)=if(bytes>=1048576)String.format("%.1f MB",bytes/1048576.0) else (bytes/1024).toString()+" KB"
-    override fun onDestroy(){ticker?.let{handler.removeCallbacks(it)};bassBoost?.release();bassBoost=null;player?.release();player=null;mediaSession?.isActive=false;mediaSession?.release();mediaSession=null;notificationManager.cancel(77);super.onDestroy()}
+    override fun onDestroy(){ticker?.let{handler.removeCallbacks(it)};bassBoost?.release();bassBoost=null;if(player?.isPlaying!=true){player?.release();player=null;PlaybackService.retainedPlayer=null};mediaSession?.isActive=false;mediaSession?.release();mediaSession=null;super.onDestroy()}
 }
