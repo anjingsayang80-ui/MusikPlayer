@@ -264,7 +264,7 @@ class MainActivity : Activity() {
         }
         videoView.setOnTouchListener { view,event ->
             when(event.action) {
-                android.view.MotionEvent.ACTION_DOWN -> { view.tag=System.currentTimeMillis(); true }
+                android.view.MotionEvent.ACTION_DOWN -> { view.tag=System.currentTimeMillis(); false }
                 android.view.MotionEvent.ACTION_UP -> {
                     val started=view.tag as? Long ?: 0L
                     val elapsed=System.currentTimeMillis()-started
@@ -280,9 +280,9 @@ class MainActivity : Activity() {
                         handler.removeCallbacks(tapAction)
                         handler.postDelayed(tapAction,350)
                     }
-                    true
+                    false
                 }
-                else -> true
+                else -> false
             }
         }
         videoView.setVideoURI(uri)
