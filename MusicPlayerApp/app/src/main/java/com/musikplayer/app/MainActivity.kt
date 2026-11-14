@@ -356,7 +356,7 @@ class MainActivity : Activity() {
             videoView.stopPlayback()
             requestedOrientation=oldOrientation
         }
-        requestedOrientation=ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        requestedOrientation=ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         dialog.show()
         dialog.window?.apply {
             setLayout(-1,-1)
