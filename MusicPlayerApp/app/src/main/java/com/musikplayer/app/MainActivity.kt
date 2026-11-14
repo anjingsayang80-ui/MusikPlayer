@@ -68,6 +68,7 @@ class MainActivity : Activity() {
     private val actionNext = "com.musikplayer.app.NEXT"
     private var pendingDownloadUrl: String? = null
     private var pendingDownloadVideo = false
+    private var playbackGeneration = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -175,6 +176,10 @@ class MainActivity : Activity() {
         nowTitle=label("Pilih lagu untuk diputar",13f,Color.WHITE,true); nowArtist=label("Musik di perangkat kamu",11f,muted)
         info.addView(nowTitle); info.addView(nowArtist); mini.addView(info,LinearLayout.LayoutParams(0,-2,1f))
         miniPlay=centered("▶",22f); miniPlay.setOnClickListener { togglePlay() }; mini.addView(miniPlay,LinearLayout.LayoutParams(dp(44),dp(44)))
+        mini.addView(centered("■",18f,Color.WHITE,true).apply {
+            setOnClickListener { stopPlayback() }
+            contentDescription="Hentikan musik"
+        },LinearLayout.LayoutParams(dp(38),dp(44)))
         val miniWrap=LinearLayout(this).apply { setPadding(dp(12),dp(4),dp(12),dp(6)); addView(mini) }; root.addView(miniWrap)
 
         setContentView(root)
@@ -858,53 +863,51 @@ class MainActivity : Activity() {
     private fun playSong(index:Int, failedAttempts:Int=0) {
         if(songs.isEmpty())return
         if(failedAttempts>=songs.size) {
-            player?.release()
-            player=null
-            miniPlay.text="▶"
-            updateMediaNotification(false)
+            stopPlayback()
             Toast.makeText(this,"Tidak ada lagu berikutnya yang bisa diputar",Toast.LENGTH_LONG).show()
             return
         }
         val nextIndex=((index%songs.size)+songs.size)%songs.size
+        val requestId=++playbackGeneration
         current=nextIndex
         try {
-            bassBoost?.release(); bassBoost = null
-            bassEqualizer?.release(); bassEqualizer = null
-            player?.release()
+            bassBoost?.release(); bassBoost=null
+            bassEqualizer?.release(); bassEqualizer=null
+            val old=player ?: PlaybackService.retainedPlayer
             player=null
-            val serviceIntent = Intent(this, PlaybackService::class.java)
-            if (Build.VERSION.SDK_INT >= 26) startForegroundService(serviceIntent) else startService(serviceIntent)
-            val s=songs[nextIndex]
+            PlaybackService.retainedPlayer=null
+            try { old?.setOnCompletionListener(null); old?.setOnErrorListener(null); old?.release() } catch (_:Exception) {}
+            val serviceIntent=Intent(this,PlaybackService::class.java)
+            if(Build.VERSION.SDK_INT>=26) startForegroundService(serviceIntent) else startService(serviceIntent)
+            val song=songs[nextIndex]
             val newPlayer=MediaPlayer()
             player=newPlayer
-            PlaybackService.retainedPlayer = newPlayer
-            newPlayer.setDataSource(this,ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,s.id))
-            newPlayer.setOnCompletionListener{mp->
-                if(player===mp) playNextInQueue()
+            PlaybackService.retainedPlayer=newPlayer
+            newPlayer.setDataSource(this,ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,song.id))
+            newPlayer.setOnCompletionListener { mp ->
+                if(requestId==playbackGeneration && player===mp) playNextInQueue()
             }
-            newPlayer.setOnErrorListener{mp,_,_->
-                if(player===mp) {
-                    val failedSong=songs.getOrNull(current)
+            newPlayer.setOnErrorListener { mp,_,_ ->
+                if(requestId==playbackGeneration && player===mp) {
                     player=null
-                    PlaybackService.retainedPlayer = null
-                    mp.release()
-                    if(failedSong!=null) markSongUnplayable(failedSong)
+                    PlaybackService.retainedPlayer=null
+                    try { mp.release() } catch (_:Exception) {}
+                    markSongUnplayable(song)
                     if(songs.isNotEmpty()) playSong(current.coerceAtLeast(0)%songs.size,failedAttempts+1)
-                    else { miniPlay.text="▶"; nowTitle.text="Tidak ada lagu yang bisa diputar" }
+                    else { miniPlay.text="▶"; nowTitle.text="Tidak ada lagu yang bisa diputar"; stopPlayback() }
                 }
                 true
             }
-            newPlayer.setOnPreparedListener{mp->
-                if(player!==mp) {
-                    mp.release()
+            newPlayer.setOnPreparedListener { mp ->
+                if(requestId!=playbackGeneration || player!==mp) {
+                    try { mp.release() } catch (_:Exception) {}
                     return@setOnPreparedListener
                 }
                 if(mp.duration<=0) {
-                    val badSong=songs.getOrNull(current)
                     player=null
                     PlaybackService.retainedPlayer=null
-                    mp.release()
-                    if(badSong!=null) markSongUnplayable(badSong)
+                    try { mp.release() } catch (_:Exception) {}
+                    markSongUnplayable(song)
                     if(songs.isNotEmpty()) playSong(current.coerceAtLeast(0)%songs.size,failedAttempts+1)
                     return@setOnPreparedListener
                 }
@@ -914,21 +917,41 @@ class MainActivity : Activity() {
                 miniPlay.text="Ⅱ"
                 updateMediaNotification(true)
             }
-            nowTitle.text=s.title
-            nowArtist.text=s.artist
-            miniArt.setImageBitmap(loadSongArtwork(s))
+            nowTitle.text=song.title
+            nowArtist.text=song.artist
+            miniArt.setImageBitmap(loadSongArtwork(song))
+            miniPlay.text="…"
             updateMediaNotification(false)
             newPlayer.prepareAsync()
-        }catch(_:Exception) {
-            val badSong=songs.getOrNull(nextIndex)
-            player?.release()
-            player=null
-            PlaybackService.retainedPlayer=null
-            if(badSong!=null) markSongUnplayable(badSong)
-            if(songs.isNotEmpty()) playSong(nextIndex.coerceAtLeast(0)%songs.size,failedAttempts+1)
-            else { miniPlay.text="▶"; nowTitle.text="Tidak ada lagu yang bisa diputar" }
+        } catch(e:Exception) {
+            if(requestId==playbackGeneration) {
+                val failedSong=songs.getOrNull(nextIndex)
+                player?.let { try { it.release() } catch (_:Exception) {} }
+                player=null
+                PlaybackService.retainedPlayer=null
+                if(failedSong!=null) markSongUnplayable(failedSong)
+                if(songs.isNotEmpty()) playSong(nextIndex.coerceAtLeast(0)%songs.size,failedAttempts+1)
+                else { miniPlay.text="▶"; nowTitle.text="Tidak ada lagu yang bisa diputar"; stopPlayback() }
+            }
         }
     }
+
+    private fun stopPlayback() {
+        playbackGeneration++
+        val old=player ?: PlaybackService.retainedPlayer
+        player=null
+        PlaybackService.retainedPlayer=null
+        try { old?.setOnCompletionListener(null); old?.setOnErrorListener(null); old?.release() } catch (_:Exception) {}
+        try { bassBoost?.release() } catch (_:Exception) {}
+        try { bassEqualizer?.release() } catch (_:Exception) {}
+        bassBoost=null
+        bassEqualizer=null
+        miniPlay.text="▶"
+        updateMediaNotification(false)
+        try { mediaSession?.isActive=false } catch (_:Exception) {}
+        try { stopService(Intent(this,PlaybackService::class.java)) } catch (_:Exception) {}
+    }
+
     private fun setupBassBoost(sessionId:Int) {
         try {
             bassBoost?.release()
@@ -1265,5 +1288,12 @@ class MainActivity : Activity() {
 
     private fun clock(ms:Long)=String.format("%d:%02d",TimeUnit.MILLISECONDS.toMinutes(ms),TimeUnit.MILLISECONDS.toSeconds(ms)%60)
     private fun sizeLabel(bytes:Long)=if(bytes>=1048576)String.format("%.1f MB",bytes/1048576.0) else (bytes/1024).toString()+" KB"
-    override fun onDestroy(){ticker?.let{handler.removeCallbacks(it)};bassBoost?.release();bassBoost=null;bassEqualizer?.release();bassEqualizer=null;if(player?.isPlaying!=true){player?.release();player=null;PlaybackService.retainedPlayer=null};mediaSession?.isActive=false;mediaSession?.release();mediaSession=null;super.onDestroy()}
+    override fun onDestroy(){
+        ticker?.let{handler.removeCallbacks(it)}
+        if(isFinishing) stopPlayback()
+        mediaSession?.isActive=false
+        mediaSession?.release()
+        mediaSession=null
+        super.onDestroy()
+    }
 }
