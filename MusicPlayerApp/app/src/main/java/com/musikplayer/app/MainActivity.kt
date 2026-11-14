@@ -309,27 +309,58 @@ class MainActivity : Activity() {
         return null
     }
 
-    private fun playSong(index:Int) {
-        if(index !in songs.indices)return
-        current=index
+    private fun playSong(index:Int, failedAttempts:Int=0) {
+        if(songs.isEmpty())return
+        if(failedAttempts>=songs.size) {
+            player?.release()
+            player=null
+            miniPlay.text="▶"
+            updateMediaNotification(false)
+            Toast.makeText(this,"Tidak ada lagu berikutnya yang bisa diputar",Toast.LENGTH_LONG).show()
+            return
+        }
+        val nextIndex=((index%songs.size)+songs.size)%songs.size
+        current=nextIndex
         try {
             bassBoost?.release(); bassBoost = null
             player?.release()
-            val s=songs[current]
-            player=MediaPlayer().apply{
-                setDataSource(this@MainActivity,ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,s.id))
-                setOnCompletionListener{nextSong()}
-                setOnPreparedListener{mp->
-                    mp.setVolume(playerVolume, playerVolume)
-                    setupBassBoost(mp.audioSessionId)
-                    mp.start();miniPlay.text="Ⅱ"; updateMediaNotification(true)
-                }
-                prepareAsync()
+            player=null
+            val s=songs[nextIndex]
+            val newPlayer=MediaPlayer()
+            player=newPlayer
+            newPlayer.setDataSource(this,ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,s.id))
+            newPlayer.setOnCompletionListener{mp->
+                if(player===mp) playSong((current+1)%songs.size)
             }
-            nowTitle.text=s.title;nowArtist.text=s.artist
+            newPlayer.setOnErrorListener{mp,_,_->
+                if(player===mp) {
+                    player=null
+                    mp.release()
+                    playSong((current+1)%songs.size,failedAttempts+1)
+                }
+                true
+            }
+            newPlayer.setOnPreparedListener{mp->
+                if(player!==mp) {
+                    mp.release()
+                    return@setOnPreparedListener
+                }
+                mp.setVolume(playerVolume,playerVolume)
+                setupBassBoost(mp.audioSessionId)
+                mp.start()
+                miniPlay.text="Ⅱ"
+                updateMediaNotification(true)
+            }
+            nowTitle.text=s.title
+            nowArtist.text=s.artist
             miniArt.setImageBitmap(loadSongArtwork(s))
             updateMediaNotification(false)
-        }catch(_:Exception){Toast.makeText(this,"Tidak bisa memutar file ini",Toast.LENGTH_SHORT).show();nextSong()}
+            newPlayer.prepareAsync()
+        }catch(_:Exception) {
+            player?.release()
+            player=null
+            playSong((nextIndex+1)%songs.size,failedAttempts+1)
+        }
     }
     private fun setupBassBoost(sessionId:Int) {
         try {
