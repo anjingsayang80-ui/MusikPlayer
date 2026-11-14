@@ -809,7 +809,40 @@ class MainActivity : Activity() {
                 retriever.release()
             }
         } catch (_: Exception) {}
-        return null
+        return createGeneratedArtwork(song)
+    }
+
+    private fun createGeneratedArtwork(song:Song):android.graphics.Bitmap {
+        val size=512
+        val bmp=android.graphics.Bitmap.createBitmap(size,size,android.graphics.Bitmap.Config.ARGB_8888)
+        val canvas=android.graphics.Canvas(bmp)
+        val hash=song.title.hashCode() xor song.artist.hashCode()
+        val colors=intArrayOf(
+            android.graphics.Color.rgb(55+(hash ushr 1 and 90),35+(hash ushr 4 and 65),100+(hash ushr 7 and 120)),
+            android.graphics.Color.rgb(25+(hash ushr 9 and 75),35+(hash ushr 13 and 90),75+(hash ushr 17 and 130))
+        )
+        val paint=android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        paint.shader=android.graphics.LinearGradient(0f,0f,size.toFloat(),size.toFloat(),colors,null,android.graphics.Shader.TileMode.CLAMP)
+        canvas.drawRect(0f,0f,size.toFloat(),size.toFloat(),paint)
+        paint.shader=null
+        paint.color=android.graphics.Color.argb(45,255,255,255)
+        canvas.drawCircle(390f,110f,155f,paint)
+        canvas.drawCircle(80f,460f,190f,paint)
+        paint.color=android.graphics.Color.argb(35,255,255,255)
+        for(i in 0..4) canvas.drawCircle(256f,256f,(75+i*23).toFloat(),paint)
+        paint.color=android.graphics.Color.WHITE
+        paint.textAlign=android.graphics.Paint.Align.CENTER
+        paint.typeface=android.graphics.Typeface.create("sans-serif-black",android.graphics.Typeface.BOLD)
+        paint.textSize=150f
+        val initials=song.title.trim().split(Regex("\\s+")).filter{it.isNotBlank()}.take(2).map{it.take(1).uppercase()}.joinToString("").ifBlank{"♫"}
+        canvas.drawText(initials,256f,305f,paint)
+        paint.textSize=27f
+        paint.typeface=android.graphics.Typeface.create("sans-serif-medium",android.graphics.Typeface.NORMAL)
+        canvas.drawText(song.title.take(28),256f,425f,paint)
+        paint.textSize=19f
+        paint.color=android.graphics.Color.argb(220,255,255,255)
+        canvas.drawText(song.artist.take(34),256f,463f,paint)
+        return bmp
     }
 
     private fun markSongUnplayable(song:Song) {
@@ -1023,6 +1056,11 @@ class MainActivity : Activity() {
         controls.addView(centered(if(player?.isPlaying==true)"Ⅱ" else "▶",34f).apply{setOnClickListener{togglePlay();text=if(player?.isPlaying==true)"Ⅱ" else "▶"}},LinearLayout.LayoutParams(dp(70),dp(60)))
         controls.addView(centered("▶|",27f).apply{setOnClickListener{nextSong()}},LinearLayout.LayoutParams(dp(65),dp(60)))
         box.addView(controls)
+        box.addView(centered("♫  LIHAT LIRIK",13f,Color.WHITE,true).apply {
+            background=panelBg(Color.rgb(55,39,78),22)
+            setPadding(dp(22),dp(11),dp(22),dp(11))
+            setOnClickListener { showLyrics(s) }
+        },LinearLayout.LayoutParams(-1,dp(44)).apply { topMargin=dp(10) })
 
         box.addView(label("VOLUME",12f,muted,true).apply{setPadding(0,dp(16),0,dp(2))})
         val volumeValue=TextView(this).apply{text= "${(playerVolume*100).toInt()}%";setTextColor(Color.WHITE);textSize=12f;gravity=Gravity.END}
@@ -1068,6 +1106,91 @@ class MainActivity : Activity() {
         box.addView(bassValue);box.addView(bassBar)
         AlertDialog.Builder(this).setView(box).setPositiveButton("Tutup",null).show().window?.setBackgroundDrawableResource(android.R.color.transparent)
     }
+
+    private fun showLyrics(song:Song) {
+        val prefs=getSharedPreferences("musik_player",MODE_PRIVATE)
+        val key="lyrics_${song.id}"
+        val input=EditText(this).apply {
+            setText(prefs.getString(key,"") ?: "")
+            setTextColor(Color.WHITE)
+            setHintTextColor(muted)
+            hint="Tempel atau tulis lirik di sini. Format LRC didukung untuk lirik berjalan.\n\n[00:12.50]Baris lirik pertama"
+            textSize=14f
+            gravity=Gravity.TOP
+            minLines=8
+            setPadding(dp(12),dp(10),dp(12),dp(10))
+            background=panelBg(Color.rgb(30,29,42),12)
+        }
+        val live=label("Lirik akan tampil di sini. Kamu bisa menambahkan lirik sendiri atau menempel teks LRC.",14f,Color.WHITE).apply {
+            gravity=Gravity.CENTER
+            setPadding(dp(14),dp(20),dp(14),dp(20))
+            minHeight=dp(105)
+        }
+        val box=LinearLayout(this).apply {
+            orientation=LinearLayout.VERTICAL
+            setPadding(dp(18),dp(14),dp(18),dp(8))
+            background=panelBg(Color.rgb(24,23,35),18)
+            addView(label(song.title,17f,Color.WHITE,true))
+            addView(label(song.artist,12f,muted).apply { setPadding(0,dp(3),0,dp(10)) })
+            addView(live,LinearLayout.LayoutParams(-1,-2))
+            addView(label("LIRIK LAGU",11f,accent,true).apply { setPadding(0,dp(10),0,dp(5)) })
+            addView(input,LinearLayout.LayoutParams(-1,dp(210)))
+        }
+        val dialog=AlertDialog.Builder(this).setTitle("Lirik Musik").setView(box)
+            .setNegativeButton("Tutup",null)
+            .setNeutralButton("Simpan lirik",null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                val text=input.text.toString().trim()
+                prefs.edit().putString(key,text).apply()
+                Toast.makeText(this,"Lirik tersimpan untuk lagu ini",Toast.LENGTH_SHORT).show()
+                updateLyricsPreview(text,live)
+            }
+        }
+        updateLyricsPreview(input.text.toString(),live)
+        val sync=object:Runnable {
+            override fun run() {
+                if(!dialog.isShowing)return
+                val text=prefs.getString(key,"") ?: ""
+                val lines=text.lines()
+                val position=player?.takeIf{current in songs.indices && songs[current].id==song.id}?.currentPosition ?: 0
+                val timed=lines.mapNotNull { line ->
+                    val match=Regex("""\\[(\\d{1,2}):(\\d{2})(?:[.](\\d{1,3}))?]""").find(line)
+                    if(match==null)null else {
+                        val min=match.groupValues[1].toLongOrNull()?:0L
+                        val sec=match.groupValues[2].toLongOrNull()?:0L
+                        val fraction=match.groupValues[3].padEnd(3,'0').take(3).toLongOrNull()?:0L
+                        (min*60000+sec*1000+fraction) to line.substring(match.range.last+1).trim()
+                    }
+                }.sortedBy{it.first}
+                if(timed.isNotEmpty()) {
+                    val currentLine=timed.lastOrNull{it.first<=position}
+                    live.text=currentLine?.second?.ifBlank{"♪"} ?: "Menunggu lirik..."
+                } else live.text=text.ifBlank{"Lirik belum ditambahkan"}
+                handler.postDelayed(this,400)
+            }
+        }
+        dialog.setOnDismissListener { handler.removeCallbacks(sync) }
+        dialog.show()
+        handler.post(sync)
+        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+    }
+
+    private fun updateLyricsPreview(text:String,target:TextView) {
+        val timed=text.lines().mapNotNull { line ->
+            val match=Regex("""\\[(\\d{1,2}):(\\d{2})(?:[.](\\d{1,3}))?]""").find(line)
+            if(match==null)null else {
+                val min=match.groupValues[1].toLongOrNull()?:0L
+                val sec=match.groupValues[2].toLongOrNull()?:0L
+                val frac=match.groupValues[3].padEnd(3,'0').take(3).toLongOrNull()?:0L
+                (min*60000+sec*1000+frac) to line.substring(match.range.last+1).trim()
+            }
+        }.sortedBy{it.first}
+        val pos=if(current in songs.indices && songs[current].id==lyricsCurrentSongId) player?.currentPosition?:0 else 0
+        target.text=timed.lastOrNull{it.first<=pos}?.second?.ifBlank{"♪"} ?: text.lines().firstOrNull{it.isNotBlank()} ?: "Lirik belum ditambahkan"
+    }
+
+    private var lyricsCurrentSongId:Long = -1L
 
     private fun setupMediaControls() {
         notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
