@@ -27,6 +27,7 @@ import android.widget.*
 import java.util.concurrent.TimeUnit
 
 data class Song(val id: Long, val title: String, val artist: String, val albumId: Long, val duration: Long, val size: Long)
+data class VideoItem(val id: Long, val title: String, val duration: Long, val size: Long)
 
 class MainActivity : Activity() {
     private val songs = mutableListOf<Song>()
@@ -39,6 +40,8 @@ class MainActivity : Activity() {
     private lateinit var miniArt: ImageView
     private lateinit var listBox: LinearLayout
     private lateinit var search: EditText
+    private lateinit var playAllButton: TextView
+    private var videoMode = false
     private val bg = Color.rgb(10,11,17)
     private val panel = Color.rgb(24,25,34)
     private val muted = Color.rgb(155,158,174)
@@ -57,7 +60,7 @@ class MainActivity : Activity() {
         window.statusBarColor = bg
         window.navigationBarColor = Color.BLACK
         setupMediaControls()
-        if (hasPermission()) showLibrary() else requestPermissions(arrayOf(permission()), 41)
+        if (hasPermission()) showLibrary() else requestPermissions(if (Build.VERSION.SDK_INT >= 33) arrayOf(permission(), Manifest.permission.READ_MEDIA_VIDEO) else arrayOf(permission()), 41)
     }
     private fun permission() = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_AUDIO else Manifest.permission.READ_EXTERNAL_STORAGE
     private fun hasPermission() = Build.VERSION.SDK_INT < 23 || checkSelfPermission(permission()) == PackageManager.PERMISSION_GRANTED
@@ -91,7 +94,7 @@ class MainActivity : Activity() {
             val t=centered(name,14f,if(name=="Musik") Color.WHITE else muted,name=="Musik").apply {
                 setPadding(dp(8),dp(10),dp(8),dp(10))
                 if(name=="Musik") background=GradientDrawable().apply { setColor(0x222D2140); setStroke(dp(1),accent); cornerRadius=dp(12).toFloat() }
-                setOnClickListener { if(name!="Musik") Toast.makeText(this@MainActivity,"Bagian $name segera hadir",Toast.LENGTH_SHORT).show() }
+                setOnClickListener { if (name == "Video") { videoMode = true; if (::playAllButton.isInitialized) playAllButton.visibility = android.view.View.GONE; renderVideos(search.text.toString()) } else if (name == "Musik") { videoMode = false; if (::playAllButton.isInitialized) playAllButton.visibility = android.view.View.VISIBLE; renderSongs(search.text.toString()) } else Toast.makeText(this@MainActivity,"Bagian $name segera hadir",Toast.LENGTH_SHORT).show() }
             }
             tabs.addView(t,LinearLayout.LayoutParams(0,dp(42),1f))
         }
@@ -103,7 +106,7 @@ class MainActivity : Activity() {
             isSingleLine = true; setPadding(dp(14),0,dp(14),0); background=panelBg()
             addTextChangedListener(object:android.text.TextWatcher {
                 override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int){}
-                override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int){ renderSongs(s?.toString().orEmpty()) }
+                override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int){ if(videoMode) renderVideos(s?.toString().orEmpty()) else renderSongs(s?.toString().orEmpty()) }
                 override fun afterTextChanged(s:android.text.Editable?){}
             })
         }
@@ -114,11 +117,11 @@ class MainActivity : Activity() {
         heading.addView(label("Semua Lagu",21f,Color.WHITE,true),LinearLayout.LayoutParams(0,-2,1f))
         count=label(songs.size.toString()+" lagu ditemukan",12f,muted); heading.addView(count); section.addView(heading)
         val actions=LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL; setPadding(0,dp(12),0,0) }
-        val playAll=centered("▶   PUTAR SEMUA",13f,Color.WHITE,true).apply {
+        playAllButton=centered("▶   PUTAR SEMUA",13f,Color.WHITE,true).apply {
             background=GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,intArrayOf(0xFF9B4DFF.toInt(),0xFF4D75FF.toInt())).apply { cornerRadius=dp(24).toFloat() }
             setOnClickListener { if(songs.isNotEmpty()) playSong(0) else Toast.makeText(this@MainActivity,"Belum ada lagu",Toast.LENGTH_SHORT).show() }
         }
-        actions.addView(playAll,LinearLayout.LayoutParams(0,dp(44),1f))
+        actions.addView(playAllButton,LinearLayout.LayoutParams(0,dp(44),1f))
         actions.addView(centered("⤨  Acak",13f).apply { setOnClickListener { if(songs.isNotEmpty()){ songs.shuffle(); renderSongs(search.text.toString()); playSong(0) } } },LinearLayout.LayoutParams(dp(94),dp(44)))
         section.addView(actions); root.addView(section)
 
@@ -155,6 +158,51 @@ class MainActivity : Activity() {
             val duration=c.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION); val size=c.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE)
             while(c.moveToNext()) songs.add(Song(c.getLong(id),c.getString(title)?:"Tanpa judul",c.getString(artist)?:"Artis tidak diketahui",c.getLong(album),c.getLong(duration),c.getLong(size)))
         }
+        val saved = getSharedPreferences("musik_player", MODE_PRIVATE).getString("song_order", "").orEmpty().split(",").filter { it.isNotBlank() }.mapNotNull { it.toLongOrNull() }
+        if (saved.isNotEmpty()) { val byId = songs.associateBy { it.id }; val ordered = saved.mapNotNull { byId[it] }.toMutableList(); songs.filter { it.id !in saved }.forEach { ordered.add(it) }; songs.clear(); songs.addAll(ordered) }
+    }
+    private fun moveSong(from:Int, delta:Int) {
+        val to=from+delta
+        if(from !in songs.indices || to !in songs.indices) return
+        val item=songs.removeAt(from); songs.add(to,item)
+        getSharedPreferences("musik_player", MODE_PRIVATE).edit().putString("song_order",songs.joinToString(","){it.id.toString()}).apply()
+        renderSongs(search.text.toString())
+        Toast.makeText(this,"Urutan lagu disimpan",Toast.LENGTH_SHORT).show()
+    }
+    private fun renderVideos(filter:String) {
+        if(!::listBox.isInitialized) return
+        listBox.removeAllViews()
+        val videos=mutableListOf<VideoItem>()
+        val cols=arrayOf(MediaStore.Video.Media._ID,MediaStore.Video.Media.TITLE,MediaStore.Video.Media.DURATION,MediaStore.Video.Media.SIZE)
+        contentResolver.query(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,cols,null,null,MediaStore.Video.Media.TITLE+" COLLATE NOCASE ASC")?.use { c ->
+            val id=c.getColumnIndexOrThrow(MediaStore.Video.Media._ID); val title=c.getColumnIndexOrThrow(MediaStore.Video.Media.TITLE)
+            val duration=c.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION); val size=c.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE)
+            while(c.moveToNext()) videos.add(VideoItem(c.getLong(id),c.getString(title)?:"Video tanpa judul",c.getLong(duration),c.getLong(size)))
+        }
+        val shown=videos.filter { it.title.contains(filter,true) }
+        count.text=shown.size.toString()+" video ditemukan"
+        if(shown.isEmpty()){ listBox.addView(centered("Belum ada video di HP",14f,muted).apply{setPadding(0,dp(40),0,dp(40))}); return }
+        shown.forEach { video ->
+            val row=LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL; setPadding(dp(10),dp(10),dp(10),dp(10)); background=panelBg() }
+            row.addView(centered("▶",25f,accent,true),LinearLayout.LayoutParams(dp(58),dp(54)))
+            val info=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),0,0,0) }
+            info.addView(label(video.title,14f,Color.WHITE,true).apply{maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END})
+            info.addView(label(clock(video.duration)+"  •  "+sizeLabel(video.size),11f,muted).apply{setPadding(0,dp(4),0,0)})
+            row.addView(info,LinearLayout.LayoutParams(0,-2,1f)); row.setOnClickListener{playVideo(video)}
+            val lp=LinearLayout.LayoutParams(-1,dp(72));lp.bottomMargin=dp(8);listBox.addView(row,lp)
+        }
+    }
+    private fun playVideo(video:VideoItem) {
+        val uri=ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,video.id)
+        val videoView=VideoView(this)
+        videoView.setVideoURI(uri)
+        videoView.setMediaController(android.widget.MediaController(this).apply{setAnchorView(videoView)})
+        val wrap=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(8),dp(8),dp(8),dp(8));addView(videoView,LinearLayout.LayoutParams(-1,dp(230)))}
+        val dialog=AlertDialog.Builder(this).setTitle(video.title).setView(wrap).setPositiveButton("Tutup",null).create()
+        videoView.setOnPreparedListener{it.isLooping=false;videoView.start()}
+        videoView.setOnCompletionListener{videoView.seekTo(0)}
+        dialog.setOnDismissListener{videoView.stopPlayback()}
+        dialog.show()
     }
     private fun renderSongs(filter:String) {
         if(!::listBox.isInitialized)return
@@ -172,7 +220,7 @@ class MainActivity : Activity() {
             info.addView(label(song.artist,12f,muted).apply{maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END;setPadding(0,dp(3),0,dp(3))})
             info.addView(label(clock(song.duration)+"  •  "+sizeLabel(song.size),10f,muted))
             row.addView(info,LinearLayout.LayoutParams(0,-2,1f))
-            row.addView(centered("⋮",22f).apply{setOnClickListener{AlertDialog.Builder(this@MainActivity).setTitle(song.title).setItems(arrayOf("Putar sekarang","Tambahkan ke antrean")){_,which->if(which==0)playSong(songs.indexOf(song))else Toast.makeText(this@MainActivity,"Ditambahkan ke antrean",Toast.LENGTH_SHORT).show()}.show()}},LinearLayout.LayoutParams(dp(30),dp(52)))
+            row.addView(centered("⋮",22f).apply{setOnClickListener{AlertDialog.Builder(this@MainActivity).setTitle(song.title).setItems(arrayOf("Putar sekarang","Naikkan urutan","Turunkan urutan","Tambahkan ke antrean")){_,which->val pos=songs.indexOf(song);when(which){0->playSong(pos);1->moveSong(pos,-1);2->moveSong(pos,1);3->Toast.makeText(this@MainActivity,"Ditambahkan ke antrean",Toast.LENGTH_SHORT).show()}}.show()}},LinearLayout.LayoutParams(dp(30),dp(52)))
             row.setOnClickListener{playSong(songs.indexOf(song))}
             val lp=LinearLayout.LayoutParams(-1,dp(76));lp.bottomMargin=dp(8);listBox.addView(row,lp)
         }
