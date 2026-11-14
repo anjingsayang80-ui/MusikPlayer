@@ -126,7 +126,8 @@ class MainActivity : Activity() {
             setOnClickListener { if(songs.isNotEmpty()) playSong(0) else Toast.makeText(this@MainActivity,"Belum ada lagu",Toast.LENGTH_SHORT).show() }
         }
         actions.addView(playAllButton,LinearLayout.LayoutParams(0,dp(44),1f))
-        actions.addView(centered("⤨  Acak",13f).apply { setOnClickListener { if(songs.isNotEmpty()){ songs.shuffle(); renderSongs(search.text.toString()); playSong(0) } } },LinearLayout.LayoutParams(dp(94),dp(44)))
+        actions.addView(centered("⤨  Acak",13f).apply { setOnClickListener { if(songs.isNotEmpty()){ songs.shuffle(); renderSongs(search.text.toString()); playSong(0) } } },LinearLayout.LayoutParams(dp(82),dp(44)))
+        actions.addView(centered("♫ Bass",12f,accent,true).apply { setOnClickListener { showNowPlaying() } },LinearLayout.LayoutParams(dp(72),dp(44)))
         section.addView(actions); root.addView(section)
 
         val scroll=ScrollView(this).apply { clipToPadding=false; setPadding(0,0,0,dp(8)) }
@@ -142,11 +143,6 @@ class MainActivity : Activity() {
         miniPlay=centered("▶",22f); miniPlay.setOnClickListener { togglePlay() }; mini.addView(miniPlay,LinearLayout.LayoutParams(dp(44),dp(44)))
         val miniWrap=LinearLayout(this).apply { setPadding(dp(12),dp(4),dp(12),dp(6)); addView(mini) }; root.addView(miniWrap)
 
-        val nav=LinearLayout(this).apply { gravity=Gravity.CENTER; setPadding(dp(8),dp(6),dp(8),dp(8)); setBackgroundColor(Color.rgb(20,21,28)) }
-        listOf("♫\nMusik","⇩\nFile Saya").forEachIndexed { i,item ->
-            nav.addView(centered(item,11f,if(i==0)accent else muted,i==0),LinearLayout.LayoutParams(0,dp(48),1f))
-        }
-        root.addView(nav)
         setContentView(root)
         renderSongs("")
         ticker=object:Runnable { override fun run(){ if(player?.isPlaying==true) miniPlay.text="Ⅱ"; handler.postDelayed(this,700) } }
@@ -155,6 +151,7 @@ class MainActivity : Activity() {
 
     private fun loadSongs() {
         songs.clear()
+        val hiddenIds=getSharedPreferences("musik_player",MODE_PRIVATE).getStringSet("hidden_song_ids", emptySet()).orEmpty()
         val cols=arrayOf(MediaStore.Audio.Media._ID,MediaStore.Audio.Media.TITLE,MediaStore.Audio.Media.ARTIST,MediaStore.Audio.Media.ALBUM_ID,MediaStore.Audio.Media.DURATION,MediaStore.Audio.Media.SIZE,MediaStore.Audio.Media.DATA)
         val uniqueSongs = LinkedHashMap<String, Song>()
         contentResolver.query(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,cols,MediaStore.Audio.Media.IS_MUSIC+" != 0",null,MediaStore.Audio.Media.TITLE+" COLLATE NOCASE ASC")?.use { c ->
@@ -166,7 +163,7 @@ class MainActivity : Activity() {
                 val song=Song(c.getLong(id),c.getString(title)?:"Tanpa judul",c.getString(artist)?:"Artis tidak diketahui",c.getLong(album),c.getLong(duration),c.getLong(size))
                 val path=if(data>=0) c.getString(data)?.trim()?.lowercase().orEmpty() else ""
                 val key=if(path.isNotBlank()) path else "${song.title.trim().lowercase()}|${song.artist.trim().lowercase()}|${song.duration}|${song.size}"
-                if(!uniqueSongs.containsKey(key)) uniqueSongs[key]=song
+                if(song.id.toString() !in hiddenIds && !uniqueSongs.containsKey(key)) uniqueSongs[key]=song
             }
         }
         songs.addAll(uniqueSongs.values)
@@ -273,11 +270,54 @@ class MainActivity : Activity() {
             info.addView(label(song.artist,12f,muted).apply{maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END;setPadding(0,dp(3),0,dp(3))})
             info.addView(label(clock(song.duration)+"  •  "+sizeLabel(song.size),10f,muted))
             row.addView(info,LinearLayout.LayoutParams(0,-2,1f))
-            row.addView(centered("⋮",22f).apply{setOnClickListener{AlertDialog.Builder(this@MainActivity).setTitle(song.title).setItems(arrayOf("Putar sekarang","Naikkan urutan","Turunkan urutan","Tambahkan ke antrean","Hapus musik dari HP")){_,which->val pos=songs.indexOf(song);when(which){0->playSong(pos);1->moveSong(pos,-1);2->moveSong(pos,1);3->Toast.makeText(this@MainActivity,"Ditambahkan ke antrean",Toast.LENGTH_SHORT).show();4->confirmDeleteSong(song)}}.show()}},LinearLayout.LayoutParams(dp(30),dp(52)))
+            row.addView(centered("⋮",22f).apply{setOnClickListener{AlertDialog.Builder(this@MainActivity).setTitle(song.title).setItems(arrayOf("Putar sekarang","Hapus dari daftar aplikasi","Hapus permanen dari HP")){_,which->val pos=songs.indexOf(song);when(which){0->playSong(pos);1->hideSongFromLibrary(song);2->confirmDeleteSong(song)}}.show()}},LinearLayout.LayoutParams(dp(30),dp(52)))
+            row.setOnLongClickListener {
+                val clip=android.content.ClipData.newPlainText("song_id",song.id.toString())
+                if(Build.VERSION.SDK_INT>=24) row.startDragAndDrop(clip,android.view.View.DragShadowBuilder(row),song,0)
+                else @Suppress("DEPRECATION") row.startDrag(clip,android.view.View.DragShadowBuilder(row),song,0)
+                true
+            }
+            row.setOnDragListener { target,event ->
+                when(event.action){
+                    android.view.DragEvent.ACTION_DRAG_STARTED -> true
+                    android.view.DragEvent.ACTION_DRAG_ENTERED -> { target.alpha=0.65f; true }
+                    android.view.DragEvent.ACTION_DRAG_EXITED -> { target.alpha=1f; true }
+                    android.view.DragEvent.ACTION_DROP -> {
+                        target.alpha=1f
+                        val draggedId=event.clipData.getItemAt(0).text.toString().toLongOrNull()
+                        val from=songs.indexOfFirst{it.id==draggedId}
+                        val to=songs.indexOf(song)
+                        if(from>=0 && to>=0 && from!=to){
+                            val moving=songs.removeAt(from); songs.add(to,moving)
+                            getSharedPreferences("musik_player",MODE_PRIVATE).edit().putString("song_order",songs.joinToString(","){it.id.toString()}).apply()
+                            renderSongs(search.text.toString())
+                            Toast.makeText(this@MainActivity,"Lagu dipindahkan",Toast.LENGTH_SHORT).show()
+                        }
+                        true
+                    }
+                    android.view.DragEvent.ACTION_DRAG_ENDED -> { target.alpha=1f; true }
+                    else -> true
+                }
+            }
             row.setOnClickListener{playSong(songs.indexOf(song))}
             val lp=LinearLayout.LayoutParams(-1,dp(76));lp.bottomMargin=dp(8);listBox.addView(row,lp)
         }
     }
+    private fun hideSongFromLibrary(song: Song) {
+        val prefs=getSharedPreferences("musik_player",MODE_PRIVATE)
+        val hidden=prefs.getStringSet("hidden_song_ids",emptySet()).orEmpty().toMutableSet()
+        hidden.add(song.id.toString())
+        prefs.edit().putStringSet("hidden_song_ids",hidden).apply()
+        if(current in songs.indices && songs[current].id==song.id){
+            player?.release(); player=null; PlaybackService.retainedPlayer=null; current=-1
+            nowTitle.text="Pilih lagu untuk diputar"; nowArtist.text="Musik di perangkat kamu"; miniPlay.text="▶"
+            notificationManager.cancel(77)
+        }
+        loadSongs()
+        renderSongs(search.text.toString())
+        Toast.makeText(this,"Lagu disembunyikan dari daftar aplikasi. File asli tetap ada di HP.",Toast.LENGTH_LONG).show()
+    }
+
     private fun confirmDeleteSong(song: Song) {
         AlertDialog.Builder(this)
             .setTitle("Hapus musik?")
