@@ -46,6 +46,7 @@ class MainActivity : Activity() {
     private lateinit var search: EditText
     private lateinit var playAllButton: TextView
     private var videoMode = false
+    private var selectedTab = "Musik"
     private val bg = Color.rgb(10,11,17)
     private val panel = Color.rgb(24,25,34)
     private val muted = Color.rgb(155,158,174)
@@ -98,7 +99,21 @@ class MainActivity : Activity() {
             val t=centered(name,14f,if(name=="Musik") Color.WHITE else muted,name=="Musik").apply {
                 setPadding(dp(8),dp(10),dp(8),dp(10))
                 if(name=="Musik") background=GradientDrawable().apply { setColor(0x222D2140); setStroke(dp(1),accent); cornerRadius=dp(12).toFloat() }
-                setOnClickListener { if (name == "Video") { videoMode = true; if (::playAllButton.isInitialized) playAllButton.visibility = android.view.View.GONE; renderVideos(search.text.toString()) } else if (name == "Musik") { videoMode = false; if (::playAllButton.isInitialized) playAllButton.visibility = android.view.View.VISIBLE; renderSongs(search.text.toString()) } else Toast.makeText(this@MainActivity,"Bagian $name segera hadir",Toast.LENGTH_SHORT).show() }
+                setOnClickListener {
+                    if(name=="Video" || name=="Musik") {
+                        selectedTab=name
+                        tabsLoop@ for(i in 0 until tabs.childCount) {
+                            val tab=tabs.getChildAt(i) as TextView
+                            val active=tab.text.toString()==selectedTab
+                            tab.setTextColor(if(active)Color.WHITE else muted)
+                            tab.typeface=if(active)Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+                            tab.background=if(active) GradientDrawable().apply { setColor(0x222D2140); setStroke(dp(1),accent); cornerRadius=dp(12).toFloat() } else null
+                        }
+                        videoMode=name=="Video"
+                        playAllButton.visibility=if(videoMode)android.view.View.GONE else android.view.View.VISIBLE
+                        if(videoMode)renderVideos(search.text.toString()) else renderSongs(search.text.toString())
+                    } else Toast.makeText(this@MainActivity,"Bagian $name segera hadir",Toast.LENGTH_SHORT).show()
+                }
             }
             tabs.addView(t,LinearLayout.LayoutParams(0,dp(42),1f))
         }
@@ -166,9 +181,18 @@ class MainActivity : Activity() {
                 if(song.id.toString() !in hiddenIds && !uniqueSongs.containsKey(key)) uniqueSongs[key]=song
             }
         }
-        songs.addAll(uniqueSongs.values)
+        songs.addAll(uniqueSongs.values.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.title }.thenBy(String.CASE_INSENSITIVE_ORDER) { it.artist }))
         val saved = getSharedPreferences("musik_player", MODE_PRIVATE).getString("song_order", "").orEmpty().split(",").filter { it.isNotBlank() }.mapNotNull { it.toLongOrNull() }
         if (saved.isNotEmpty()) { val byId = songs.associateBy { it.id }; val ordered = saved.mapNotNull { byId[it] }.toMutableList(); songs.filter { it.id !in saved }.forEach { ordered.add(it) }; songs.clear(); songs.addAll(ordered) }
+    }
+    private fun moveSongToFirst(song:Song) {
+        val from=songs.indexOf(song)
+        if(from<=0) return
+        val item=songs.removeAt(from)
+        songs.add(0,item)
+        getSharedPreferences("musik_player",MODE_PRIVATE).edit().putString("song_order",songs.joinToString(","){it.id.toString()}).apply()
+        renderSongs(search.text.toString())
+        Toast.makeText(this,"Lagu dipindahkan ke urutan pertama",Toast.LENGTH_SHORT).show()
     }
     private fun moveSong(from:Int, delta:Int) {
         val to=from+delta
@@ -307,14 +331,18 @@ class MainActivity : Activity() {
         shown.forEach { song ->
             val row=LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL; setPadding(dp(8),dp(7),dp(8),dp(7)); background=panelBg() }
             val art=ImageView(this).apply { scaleType=ImageView.ScaleType.CENTER_CROP; background=panelBg(Color.rgb(40,35,55),10); clipToOutline=true; setImageResource(R.drawable.app_icon) }
-            art.setImageBitmap(loadSongArtwork(song))
+            art.tag=song.id
+            Thread {
+                val bitmap=loadSongArtwork(song)
+                handler.post { if(art.tag==song.id && bitmap!=null) art.setImageBitmap(bitmap) }
+            }.start()
             row.addView(art,LinearLayout.LayoutParams(dp(58),dp(58)))
             val info=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),0,dp(5),0) }
             info.addView(label(song.title,14f,Color.WHITE,true).apply{maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END})
             info.addView(label(song.artist,12f,muted).apply{maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END;setPadding(0,dp(3),0,dp(3))})
             info.addView(label(clock(song.duration)+"  •  "+sizeLabel(song.size),10f,muted))
             row.addView(info,LinearLayout.LayoutParams(0,-2,1f))
-            row.addView(centered("⋮",22f).apply{setOnClickListener{AlertDialog.Builder(this@MainActivity).setTitle(song.title).setItems(arrayOf("Putar sekarang","Hapus dari daftar aplikasi","Hapus lagu dari HP")){_,which->val pos=songs.indexOf(song);when(which){0->playSong(pos);1->hideSongFromLibrary(song);2->confirmDeleteSong(song)}}.show()}},LinearLayout.LayoutParams(dp(30),dp(52)))
+            row.addView(centered("⋮",22f).apply{setOnClickListener{AlertDialog.Builder(this@MainActivity).setTitle(song.title).setItems(arrayOf("Putar sekarang","Pindahkan ke urutan pertama","Hapus dari daftar aplikasi","Hapus lagu dari HP")){_,which->val pos=songs.indexOf(song);when(which){0->playSong(pos);1->moveSongToFirst(song);2->hideSongFromLibrary(song);3->confirmDeleteSong(song)}}.show()}},LinearLayout.LayoutParams(dp(30),dp(52)))
             row.setOnLongClickListener {
                 val clip=android.content.ClipData.newPlainText("song_id",song.id.toString())
                 if(Build.VERSION.SDK_INT>=24) row.startDragAndDrop(clip,android.view.View.DragShadowBuilder(row),song,0)
