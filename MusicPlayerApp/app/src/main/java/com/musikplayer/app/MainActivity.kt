@@ -220,11 +220,70 @@ class MainActivity : Activity() {
             info.addView(label(song.artist,12f,muted).apply{maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END;setPadding(0,dp(3),0,dp(3))})
             info.addView(label(clock(song.duration)+"  •  "+sizeLabel(song.size),10f,muted))
             row.addView(info,LinearLayout.LayoutParams(0,-2,1f))
-            row.addView(centered("⋮",22f).apply{setOnClickListener{AlertDialog.Builder(this@MainActivity).setTitle(song.title).setItems(arrayOf("Putar sekarang","Naikkan urutan","Turunkan urutan","Tambahkan ke antrean")){_,which->val pos=songs.indexOf(song);when(which){0->playSong(pos);1->moveSong(pos,-1);2->moveSong(pos,1);3->Toast.makeText(this@MainActivity,"Ditambahkan ke antrean",Toast.LENGTH_SHORT).show()}}.show()}},LinearLayout.LayoutParams(dp(30),dp(52)))
+            row.addView(centered("⋮",22f).apply{setOnClickListener{AlertDialog.Builder(this@MainActivity).setTitle(song.title).setItems(arrayOf("Putar sekarang","Naikkan urutan","Turunkan urutan","Tambahkan ke antrean","Hapus musik dari HP")){_,which->val pos=songs.indexOf(song);when(which){0->playSong(pos);1->moveSong(pos,-1);2->moveSong(pos,1);3->Toast.makeText(this@MainActivity,"Ditambahkan ke antrean",Toast.LENGTH_SHORT).show();4->confirmDeleteSong(song)}}.show()}},LinearLayout.LayoutParams(dp(30),dp(52)))
             row.setOnClickListener{playSong(songs.indexOf(song))}
             val lp=LinearLayout.LayoutParams(-1,dp(76));lp.bottomMargin=dp(8);listBox.addView(row,lp)
         }
     }
+    private fun confirmDeleteSong(song: Song) {
+        AlertDialog.Builder(this)
+            .setTitle("Hapus musik?")
+            .setMessage("“${song.title}” akan dihapus dari penyimpanan HP, bukan hanya dari daftar aplikasi.")
+            .setNegativeButton("Batal", null)
+            .setPositiveButton("Hapus") { _, _ -> deleteSong(song) }
+            .show()
+    }
+
+    private fun deleteSong(song: Song) {
+        val uri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, song.id)
+        try {
+            if (Build.VERSION.SDK_INT >= 30) {
+                val request = MediaStore.createDeleteRequest(contentResolver, listOf(uri))
+                startIntentSenderForResult(request.intentSender, 70, null, 0, 0, 0)
+            } else {
+                val deleted = contentResolver.delete(uri, null, null)
+                if (deleted > 0) finishSongDeletion(song) else Toast.makeText(this, "Musik tidak dapat dihapus", Toast.LENGTH_SHORT).show()
+            }
+        } catch (e: android.app.RecoverableSecurityException) {
+            if (Build.VERSION.SDK_INT == 29) {
+                try { startIntentSenderForResult(e.userAction.actionIntent.intentSender, 70, null, 0, 0, 0) }
+                catch (_: Exception) { Toast.makeText(this, "Izin hapus tidak dapat dibuka", Toast.LENGTH_SHORT).show() }
+            } else Toast.makeText(this, "Musik tidak dapat dihapus", Toast.LENGTH_SHORT).show()
+        } catch (_: Exception) {
+            Toast.makeText(this, "Musik tidak dapat dihapus", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun finishSongDeletion(song: Song) {
+        if (current in songs.indices && songs[current].id == song.id) {
+            player?.release()
+            player = null
+            current = -1
+            nowTitle.text = "Pilih lagu untuk diputar"
+            nowArtist.text = "Musik di perangkat kamu"
+            miniPlay.text = "▶"
+            notificationManager.cancel(77)
+        }
+        getSharedPreferences("musik_player", MODE_PRIVATE).edit().remove("song_order").apply()
+        loadSongs()
+        renderSongs(search.text.toString())
+        Toast.makeText(this, "Musik berhasil dihapus dari HP", Toast.LENGTH_SHORT).show()
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 70 && resultCode == Activity.RESULT_OK) {
+            val pending = songs.firstOrNull { it.id == pendingDeleteSongId }
+            if (pending != null) finishSongDeletion(pending)
+            else {
+                loadSongs()
+                renderSongs(search.text.toString())
+            }
+        }
+    }
+
+    private var pendingDeleteSongId: Long = -1L
+
     private fun playSong(index:Int) {
         if(index !in songs.indices)return
         current=index
