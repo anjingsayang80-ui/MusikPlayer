@@ -50,6 +50,8 @@ class MainActivity : Activity() {
     private lateinit var playAllButton: TextView
     private var videoMode = false
     private var selectedTab = "Musik"
+    private var selectedPlaylistName: String? = null
+    private var playbackQueue: MutableList<Long>? = null
     private val bg = Color.rgb(10,11,17)
     private val panel = Color.rgb(24,25,34)
     private val muted = Color.rgb(155,158,174)
@@ -141,11 +143,12 @@ class MainActivity : Activity() {
         val actions=LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL; setPadding(0,dp(12),0,0) }
         playAllButton=centered("▶   PUTAR SEMUA",13f,Color.WHITE,true).apply {
             background=GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,intArrayOf(0xFF9B4DFF.toInt(),0xFF4D75FF.toInt())).apply { cornerRadius=dp(24).toFloat() }
-            setOnClickListener { if(songs.isNotEmpty()) playSong(0) else Toast.makeText(this@MainActivity,"Belum ada lagu",Toast.LENGTH_SHORT).show() }
+            setOnClickListener { playVisibleSongs() }
         }
         actions.addView(playAllButton,LinearLayout.LayoutParams(0,dp(44),1f))
         actions.addView(centered("⤨  Acak",13f).apply { setOnClickListener { if(songs.isNotEmpty()){ songs.shuffle(); renderSongs(search.text.toString()); playSong(0) } } },LinearLayout.LayoutParams(dp(82),dp(44)))
-        actions.addView(centered("♫ Bass",12f,accent,true).apply { setOnClickListener { showBassSettings() } },LinearLayout.LayoutParams(dp(72),dp(44)))
+        actions.addView(centered("♫ Bass",12f,accent,true).apply { setOnClickListener { showBassSettings() } },LinearLayout.LayoutParams(dp(68),dp(44)))
+        actions.addView(centered("☷ List",12f,Color.WHITE,true).apply { setOnClickListener { showPlaylists() } },LinearLayout.LayoutParams(dp(66),dp(44)))
         section.addView(actions); root.addView(section)
 
         musicScroll=ScrollView(this).apply { clipToPadding=false; setPadding(0,0,0,dp(8)) }
@@ -383,13 +386,98 @@ class MainActivity : Activity() {
         videoView.setVideoURI(uri)
     }
 
+    private fun playlistMap(): LinkedHashMap<String, MutableList<Long>> {
+        val result=LinkedHashMap<String,MutableList<Long>>()
+        try {
+            val raw=getSharedPreferences("musik_player",MODE_PRIVATE).getString("playlists_json","{}") ?: "{}"
+            val obj=org.json.JSONObject(raw)
+            val keys=obj.keys()
+            while(keys.hasNext()) {
+                val name=keys.next()
+                val arr=obj.optJSONArray(name) ?: org.json.JSONArray()
+                val ids=mutableListOf<Long>()
+                for(i in 0 until arr.length()) { val id=arr.optLong(i,-1L); if(id>0L)ids.add(id) }
+                result[name]=ids
+            }
+        } catch (_:Exception) {}
+        return result
+    }
+    private fun savePlaylistMap(map:LinkedHashMap<String,MutableList<Long>>) {
+        val obj=org.json.JSONObject()
+        map.forEach { (name,ids) -> obj.put(name,org.json.JSONArray(ids)) }
+        getSharedPreferences("musik_player",MODE_PRIVATE).edit().putString("playlists_json",obj.toString()).apply()
+    }
+    private fun playVisibleSongs() {
+        val ids=selectedPlaylistName?.let { playlistMap()[it] }
+        val first=if(ids==null) songs.firstOrNull() else songs.firstOrNull { it.id in ids }
+        if(first==null) { Toast.makeText(this,"Belum ada lagu di daftar ini",Toast.LENGTH_SHORT).show(); return }
+        playbackQueue=ids?.toMutableList()
+        playSong(songs.indexOf(first))
+    }
+    private fun showPlaylists() {
+        val map=playlistMap()
+        val names=map.keys.toList()
+        val options=arrayOf("Buat daftar putar baru") + names.map { it + "  (" + (map[it]?.size ?: 0) + " lagu)" } + arrayOf("Semua Lagu")
+        AlertDialog.Builder(this).setTitle("Daftar Putar").setItems(options) { _,which ->
+            when {
+                which==0 -> createPlaylist()
+                which<=names.size -> {
+                    val name=names[which-1]
+                    AlertDialog.Builder(this).setTitle(name).setItems(arrayOf("Buka daftar putar","Putar semua lagu","Hapus daftar putar")) { _,action ->
+                        when(action) {
+                            0 -> { selectedPlaylistName=name; renderSongs(search.text.toString()) }
+                            1 -> { selectedPlaylistName=name; renderSongs(search.text.toString()); playbackQueue=map[name]?.toMutableList(); playVisibleSongs() }
+                            2 -> AlertDialog.Builder(this).setMessage("Hapus daftar putar " + name + "? File musik tidak akan dihapus.")
+                                .setNegativeButton("Batal",null).setPositiveButton("Hapus") { _,_ ->
+                                    val updated=playlistMap(); updated.remove(name); savePlaylistMap(updated)
+                                    if(selectedPlaylistName==name){selectedPlaylistName=null;renderSongs(search.text.toString())}
+                                    Toast.makeText(this,"Daftar putar dihapus",Toast.LENGTH_SHORT).show()
+                                }.show()
+                        }
+                    }.show()
+                }
+                else -> { selectedPlaylistName=null; playbackQueue=null; renderSongs(search.text.toString()) }
+            }
+        }.show()
+    }
+    private fun createPlaylist(song:Song?=null) {
+        val field=EditText(this).apply { hint="Nama daftar putar"; setTextColor(Color.WHITE); setHintTextColor(muted) }
+        AlertDialog.Builder(this).setTitle("Buat daftar putar").setView(field)
+            .setNegativeButton("Batal",null).setPositiveButton("Buat") { _,_ ->
+                val name=field.text.toString().trim()
+                if(name.isBlank()) { Toast.makeText(this,"Nama daftar putar belum diisi",Toast.LENGTH_SHORT).show(); return@setPositiveButton }
+                val map=playlistMap()
+                if(map.containsKey(name)) { Toast.makeText(this,"Nama daftar putar sudah ada",Toast.LENGTH_SHORT).show(); return@setPositiveButton }
+                map[name]=mutableListOf<Long>().apply { if(song!=null)add(song.id) }
+                savePlaylistMap(map)
+                Toast.makeText(this,if(song!=null)"Lagu ditambahkan ke " + name else "Daftar putar dibuat",Toast.LENGTH_SHORT).show()
+            }.show()
+    }
+    private fun addSongToPlaylist(song:Song) {
+        val map=playlistMap()
+        val names=map.keys.toList()
+        val options=names.map { it + "  (" + (map[it]?.size ?: 0) + " lagu)" }.toMutableList()
+        options.add("Buat daftar putar baru")
+        AlertDialog.Builder(this).setTitle("Tambah ke daftar putar").setItems(options.toTypedArray()) { _,which ->
+            if(which==names.size) createPlaylist(song) else {
+                val updated=playlistMap()
+                val ids=updated[names[which]] ?: mutableListOf<Long>()
+                if(song.id !in ids) ids.add(song.id)
+                updated[names[which]]=ids
+                savePlaylistMap(updated)
+                Toast.makeText(this,"Ditambahkan ke " + names[which],Toast.LENGTH_SHORT).show()
+                if(selectedPlaylistName==names[which])renderSongs(search.text.toString())
+            }
+        }.show()
+    }
     private fun renderSongs(filter:String) {
         if(!::listBox.isInitialized)return
         listBox.removeAllViews()
-        sectionTitle.text="Semua Lagu"
-        val shown=songs.filter { it.title.contains(filter,true)||it.artist.contains(filter,true) }
+        val playlistIds=selectedPlaylistName?.let { playlistMap()[it]?.toSet() }
+        sectionTitle.text=selectedPlaylistName ?: "Semua Lagu"
+        val shown=songs.filter { (playlistIds==null || it.id in playlistIds) && (it.title.contains(filter,true)||it.artist.contains(filter,true)) }
         count.text=shown.size.toString()+" lagu ditemukan"
-        if(shown.isEmpty()){ listBox.addView(centered(if(songs.isEmpty())"Belum ada file musik di HP" else "Lagu tidak ditemukan",14f,muted).apply{setPadding(0,dp(40),0,dp(40))}); return }
+        if(shown.isEmpty()){ listBox.addView(centered(if(selectedPlaylistName!=null)"Daftar putar ini masih kosong" else if(songs.isEmpty())"Belum ada file musik di HP" else "Lagu tidak ditemukan",14f,muted).apply{setPadding(0,dp(40),0,dp(40))}); return }
         shown.forEach { song ->
             val row=LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL; setPadding(dp(8),dp(7),dp(8),dp(7)); background=panelBg() }
             val art=ImageView(this).apply { scaleType=ImageView.ScaleType.CENTER_CROP; background=panelBg(Color.rgb(40,35,55),10); clipToOutline=true; setImageResource(R.drawable.app_icon) }
@@ -408,7 +496,7 @@ class MainActivity : Activity() {
                 contentDescription="Pindahkan ${song.title} ke urutan pertama"
                 setOnClickListener { moveSongToFirst(song) }
             },LinearLayout.LayoutParams(dp(34),dp(52)))
-            row.addView(centered("⋮",22f).apply{setOnClickListener{AlertDialog.Builder(this@MainActivity).setTitle(song.title).setItems(arrayOf("Putar sekarang","Pindahkan ke urutan pertama","Hapus dari daftar aplikasi","Hapus lagu dari HP")){_,which->val pos=songs.indexOf(song);when(which){0->playSong(pos);1->moveSongToFirst(song);2->hideSongFromLibrary(song);3->confirmDeleteSong(song)}}.show()}},LinearLayout.LayoutParams(dp(30),dp(52)))
+            row.addView(centered("⋮",22f).apply{setOnClickListener{AlertDialog.Builder(this@MainActivity).setTitle(song.title).setItems(arrayOf("Putar sekarang","Tambah ke daftar putar","Pindahkan ke urutan pertama","Hapus dari daftar aplikasi","Hapus lagu dari HP")){_,which->val pos=songs.indexOf(song);when(which){0->{playbackQueue=selectedPlaylistName?.let{playlistMap()[it]?.toMutableList()};playSong(pos)};1->addSongToPlaylist(song);2->moveSongToFirst(song);3->hideSongFromLibrary(song);4->confirmDeleteSong(song)}}.show()}},LinearLayout.LayoutParams(dp(30),dp(52)))
             row.setOnLongClickListener {
                 val clip=android.content.ClipData.newPlainText("song_id",song.id.toString())
                 if(Build.VERSION.SDK_INT>=24) row.startDragAndDrop(clip,android.view.View.DragShadowBuilder(row),song,0)
@@ -437,7 +525,7 @@ class MainActivity : Activity() {
                     else -> true
                 }
             }
-            row.setOnClickListener{playSong(songs.indexOf(song))}
+            row.setOnClickListener{playbackQueue=selectedPlaylistName?.let{playlistMap()[it]?.toMutableList()};playSong(songs.indexOf(song))}
             val lp=LinearLayout.LayoutParams(-1,dp(76));lp.bottomMargin=dp(8);listBox.addView(row,lp)
         }
     }
@@ -573,7 +661,7 @@ class MainActivity : Activity() {
             PlaybackService.retainedPlayer = newPlayer
             newPlayer.setDataSource(this,ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,s.id))
             newPlayer.setOnCompletionListener{mp->
-                if(player===mp) playSong((current+1)%songs.size)
+                if(player===mp) playNextInQueue()
             }
             newPlayer.setOnErrorListener{mp,_,_->
                 if(player===mp) {
@@ -726,7 +814,17 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this).setView(box).setPositiveButton("Selesai",null).show().window?.setBackgroundDrawableResource(android.R.color.transparent)
     }
     private fun togglePlay(){val p=player;if(p==null){if(songs.isNotEmpty())playSong(0)}else if(p.isPlaying){p.pause();miniPlay.text="▶";updateMediaNotification(false)}else{p.start();miniPlay.text="Ⅱ";updateMediaNotification(true)}}
-    private fun nextSong(){if(songs.isNotEmpty())playSong(if(current<0)0 else(current+1)%songs.size)}
+    private fun nextSong(){playNextInQueue()}
+    private fun playNextInQueue(){
+        if(songs.isEmpty())return
+        val queue=playbackQueue
+        if(queue.isNullOrEmpty()){playSong(if(current<0)0 else(current+1)%songs.size);return}
+        val currentId=songs.getOrNull(current)?.id
+        val at=queue.indexOf(currentId)
+        val nextId=queue.getOrNull(if(at<0)0 else (at+1)%queue.size) ?: return
+        val nextIndex=songs.indexOfFirst{it.id==nextId}
+        if(nextIndex>=0)playSong(nextIndex) else {queue.remove(nextId);playNextInQueue()}
+    }
     private fun showNowPlaying(){
         if(current !in songs.indices)return
         val s=songs[current]
@@ -798,7 +896,7 @@ class MainActivity : Activity() {
                 override fun onPlay() { if (player == null && songs.isNotEmpty()) playSong(if (current < 0) 0 else current) else if (player?.isPlaying == false) togglePlay() }
                 override fun onPause() { if (player?.isPlaying == true) togglePlay() }
                 override fun onSkipToNext() { nextSong() }
-                override fun onSkipToPrevious() { if (songs.isNotEmpty()) playSong(if (current <= 0) songs.lastIndex else current - 1) }
+                override fun onSkipToPrevious() { if (songs.isNotEmpty()) { val q=playbackQueue; if(q.isNullOrEmpty()) playSong(if(current<=0)songs.lastIndex else current-1) else { val at=q.indexOf(songs.getOrNull(current)?.id); val id=q.getOrNull(if(at<=0) q.lastIndex else at-1); val ix=songs.indexOfFirst{it.id==id}; if(ix>=0)playSong(ix) } } }
             })
             isActive = true
         }
@@ -849,7 +947,7 @@ class MainActivity : Activity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         when (intent.action) {
-            actionPrevious -> if (songs.isNotEmpty()) playSong(if (current <= 0) songs.lastIndex else current - 1)
+            actionPrevious -> if (songs.isNotEmpty()) { val q=playbackQueue; if(q.isNullOrEmpty()) playSong(if(current<=0)songs.lastIndex else current-1) else { val at=q.indexOf(songs.getOrNull(current)?.id); val id=q.getOrNull(if(at<=0) q.lastIndex else at-1); val ix=songs.indexOfFirst{it.id==id}; if(ix>=0)playSong(ix) } }
             actionToggle -> togglePlay()
             actionNext -> nextSong()
         }
