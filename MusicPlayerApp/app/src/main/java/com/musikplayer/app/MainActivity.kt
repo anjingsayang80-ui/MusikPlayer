@@ -141,7 +141,12 @@ class MainActivity : Activity() {
         val miniWrap=LinearLayout(this).apply { setPadding(dp(12),dp(4),dp(12),dp(6)); addView(mini) }; root.addView(miniWrap)
 
         val nav=LinearLayout(this).apply { gravity=Gravity.CENTER; setPadding(dp(8),dp(6),dp(8),dp(8)); setBackgroundColor(Color.rgb(20,21,28)) }
-        listOf("⌂\nRumah","♫\nMusik","▣\nGame","⇩\nFile Saya","♙\nSaya").forEachIndexed { i,item ->
+        listOf("⌂
+Rumah","♫
+Musik","▣
+Game","⇩
+File Saya","♙
+Saya").forEachIndexed { i,item ->
             nav.addView(centered(item,11f,if(i==1)accent else muted,i==1).apply { setOnClickListener { if(i!=1) Toast.makeText(this@MainActivity,"Menu segera hadir",Toast.LENGTH_SHORT).show() } },LinearLayout.LayoutParams(0,dp(48),1f))
         }
         root.addView(nav)
@@ -297,7 +302,11 @@ class MainActivity : Activity() {
             player=MediaPlayer().apply{
                 setDataSource(this@MainActivity,ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,s.id))
                 setOnCompletionListener{nextSong()}
-                setOnPreparedListener{mp->\n                    mp.setVolume(playerVolume, playerVolume)\n                    setupBassBoost(mp.audioSessionId)\n                    mp.start();miniPlay.text="Ⅱ"; updateMediaNotification(true)\n                }
+                setOnPreparedListener{mp->
+                    mp.setVolume(playerVolume, playerVolume)
+                    setupBassBoost(mp.audioSessionId)
+                    mp.start();miniPlay.text="Ⅱ"; updateMediaNotification(true)
+                }
                 prepareAsync()
             }
             nowTitle.text=s.title;nowArtist.text=s.artist
