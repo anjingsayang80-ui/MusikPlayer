@@ -37,6 +37,7 @@ class MainActivity : Activity() {
     private var playerVolume = 1.0f
     private var current = -1
     private lateinit var count: TextView
+    private lateinit var sectionTitle: TextView
     private lateinit var nowTitle: TextView
     private lateinit var nowArtist: TextView
     private lateinit var miniPlay: TextView
@@ -117,7 +118,7 @@ class MainActivity : Activity() {
 
         val section=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(20),dp(4),dp(20),dp(10)) }
         val heading=LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL }
-        heading.addView(label("Semua Lagu",21f,Color.WHITE,true),LinearLayout.LayoutParams(0,-2,1f))
+        sectionTitle=label("Semua Lagu",21f,Color.WHITE,true); heading.addView(sectionTitle,LinearLayout.LayoutParams(0,-2,1f))
         count=label(songs.size.toString()+" lagu ditemukan",12f,muted); heading.addView(count); section.addView(heading)
         val actions=LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL; setPadding(0,dp(12),0,0) }
         playAllButton=centered("▶   PUTAR SEMUA",13f,Color.WHITE,true).apply {
@@ -183,6 +184,7 @@ class MainActivity : Activity() {
     private fun renderVideos(filter:String) {
         if(!::listBox.isInitialized) return
         listBox.removeAllViews()
+        sectionTitle.text="Telah diunduh"
         val videos=mutableListOf<VideoItem>()
         val cols=arrayOf(MediaStore.Video.Media._ID,MediaStore.Video.Media.TITLE,MediaStore.Video.Media.DURATION,MediaStore.Video.Media.SIZE)
         contentResolver.query(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,cols,null,null,MediaStore.Video.Media.TITLE+" COLLATE NOCASE ASC")?.use { c ->
@@ -257,6 +259,7 @@ class MainActivity : Activity() {
     private fun renderSongs(filter:String) {
         if(!::listBox.isInitialized)return
         listBox.removeAllViews()
+        sectionTitle.text="Semua Lagu"
         val shown=songs.filter { it.title.contains(filter,true)||it.artist.contains(filter,true) }
         count.text=shown.size.toString()+" lagu ditemukan"
         if(shown.isEmpty()){ listBox.addView(centered(if(songs.isEmpty())"Belum ada file musik di HP" else "Lagu tidak ditemukan",14f,muted).apply{setPadding(0,dp(40),0,dp(40))}); return }
