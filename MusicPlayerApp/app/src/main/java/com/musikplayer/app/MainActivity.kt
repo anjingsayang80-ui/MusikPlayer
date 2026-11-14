@@ -127,7 +127,7 @@ class MainActivity : Activity() {
         }
         actions.addView(playAllButton,LinearLayout.LayoutParams(0,dp(44),1f))
         actions.addView(centered("⤨  Acak",13f).apply { setOnClickListener { if(songs.isNotEmpty()){ songs.shuffle(); renderSongs(search.text.toString()); playSong(0) } } },LinearLayout.LayoutParams(dp(82),dp(44)))
-        actions.addView(centered("♫ Bass",12f,accent,true).apply { setOnClickListener { showNowPlaying() } },LinearLayout.LayoutParams(dp(72),dp(44)))
+        actions.addView(centered("♫ Bass",12f,accent,true).apply { setOnClickListener { showBassSettings() } },LinearLayout.LayoutParams(dp(72),dp(44)))
         section.addView(actions); root.addView(section)
 
         val scroll=ScrollView(this).apply { clipToPadding=false; setPadding(0,0,0,dp(8)) }
@@ -217,20 +217,28 @@ class MainActivity : Activity() {
     private fun playVideo(video:VideoItem) {
         val uri=ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,video.id)
         val videoView=VideoView(this)
-        videoView.setVideoURI(uri)
-        videoView.setMediaController(android.widget.MediaController(this).apply{setAnchorView(videoView)})
-        val wrap=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(8),dp(8),dp(8),dp(8));addView(videoView,LinearLayout.LayoutParams(-1,dp(230)))}
-        val dialog=AlertDialog.Builder(this).setTitle(video.title).setView(wrap).setPositiveButton("Tutup",null).create()
+        val frame=FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
+        frame.addView(videoView,FrameLayout.LayoutParams(-1,-1))
+        val controller=android.widget.MediaController(this)
+        controller.setAnchorView(frame)
+        videoView.setMediaController(controller)
+        val dialog=AlertDialog.Builder(this).setView(frame).create()
+        dialog.window?.setBackgroundDrawableResource(android.R.color.black)
+        dialog.setOnShowListener {
+            dialog.window?.setLayout(-1,-1)
+            dialog.window?.setFlags(android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN,android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN)
+        }
         val progressKey="video_progress_${video.id}"
         var saveProgress:Runnable?=null
-        videoView.setOnPreparedListener{
+        videoView.setOnPreparedListener {
             it.isLooping=false
             val saved=getSharedPreferences("musik_player",MODE_PRIVATE).getInt(progressKey,0)
             if(saved in 1..99) videoView.seekTo((video.duration*saved/100).toInt())
             videoView.start()
-            saveProgress=object:Runnable{
-                override fun run(){
-                    if(videoView.isPlaying && video.duration>0){
+            controller.show(2500)
+            saveProgress=object:Runnable {
+                override fun run() {
+                    if(videoView.isPlaying && video.duration>0) {
                         val percent=(videoView.currentPosition*100L/video.duration).toInt().coerceIn(0,99)
                         getSharedPreferences("musik_player",MODE_PRIVATE).edit().putInt(progressKey,percent).apply()
                     }
@@ -239,13 +247,49 @@ class MainActivity : Activity() {
             }
             handler.post(saveProgress!!)
         }
-        videoView.setOnCompletionListener{
+        videoView.setOnCompletionListener {
             getSharedPreferences("musik_player",MODE_PRIVATE).edit().putInt(progressKey,100).apply()
             videoView.seekTo(0)
         }
-        dialog.setOnDismissListener{
+        var tapCount=0
+        var tapSide=0
+        val tapAction=Runnable {
+            val amount=when(tapCount){1->0;2->20000;else->30000}
+            if(amount>0) {
+                val target=(videoView.currentPosition+(if(tapSide==1) -amount else amount)).coerceIn(0,videoView.duration.coerceAtLeast(0))
+                videoView.seekTo(target)
+                Toast.makeText(this,if(tapSide==1)"Mundur ${amount/1000} detik" else "Maju ${amount/1000} detik",Toast.LENGTH_SHORT).show()
+            }
+            tapCount=0
+        }
+        videoView.setOnTouchListener { view,event ->
+            when(event.action) {
+                android.view.MotionEvent.ACTION_DOWN -> { view.tag=System.currentTimeMillis(); true }
+                android.view.MotionEvent.ACTION_UP -> {
+                    val started=view.tag as? Long ?: 0L
+                    val elapsed=System.currentTimeMillis()-started
+                    val side=if(event.x<view.width/2)1 else 2
+                    if(elapsed>=550) {
+                        tapCount=0
+                        val jump=10000
+                        val target=(videoView.currentPosition+(if(side==1)-jump else jump)).coerceIn(0,videoView.duration.coerceAtLeast(0))
+                        videoView.seekTo(target)
+                        Toast.makeText(this,if(side==1)"Mundur 10 detik" else "Maju 10 detik",Toast.LENGTH_SHORT).show()
+                    } else {
+                        if(tapCount==0 || tapSide!=side) { tapCount=1; tapSide=side } else tapCount++
+                        handler.removeCallbacks(tapAction)
+                        handler.postDelayed(tapAction,350)
+                    }
+                    true
+                }
+                else -> true
+            }
+        }
+        videoView.setVideoURI(uri)
+        dialog.setOnDismissListener {
             saveProgress?.let{handler.removeCallbacks(it)}
-            if(video.duration>0 && videoView.currentPosition>0 && videoView.currentPosition<video.duration){
+            handler.removeCallbacks(tapAction)
+            if(video.duration>0 && videoView.currentPosition>0 && videoView.currentPosition<video.duration) {
                 val percent=(videoView.currentPosition*100L/video.duration).toInt().coerceIn(0,99)
                 getSharedPreferences("musik_player",MODE_PRIVATE).edit().putInt(progressKey,percent).apply()
             }
@@ -270,7 +314,7 @@ class MainActivity : Activity() {
             info.addView(label(song.artist,12f,muted).apply{maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END;setPadding(0,dp(3),0,dp(3))})
             info.addView(label(clock(song.duration)+"  •  "+sizeLabel(song.size),10f,muted))
             row.addView(info,LinearLayout.LayoutParams(0,-2,1f))
-            row.addView(centered("⋮",22f).apply{setOnClickListener{AlertDialog.Builder(this@MainActivity).setTitle(song.title).setItems(arrayOf("Putar sekarang","Hapus dari daftar aplikasi","Hapus permanen dari HP")){_,which->val pos=songs.indexOf(song);when(which){0->playSong(pos);1->hideSongFromLibrary(song);2->confirmDeleteSong(song)}}.show()}},LinearLayout.LayoutParams(dp(30),dp(52)))
+            row.addView(centered("⋮",22f).apply{setOnClickListener{AlertDialog.Builder(this@MainActivity).setTitle(song.title).setItems(arrayOf("Putar sekarang","Hapus dari daftar aplikasi","Hapus lagu dari HP")){_,which->val pos=songs.indexOf(song);when(which){0->playSong(pos);1->hideSongFromLibrary(song);2->confirmDeleteSong(song)}}.show()}},LinearLayout.LayoutParams(dp(30),dp(52)))
             row.setOnLongClickListener {
                 val clip=android.content.ClipData.newPlainText("song_id",song.id.toString())
                 if(Build.VERSION.SDK_INT>=24) row.startDragAndDrop(clip,android.view.View.DragShadowBuilder(row),song,0)
@@ -460,15 +504,46 @@ class MainActivity : Activity() {
     private fun setupBassBoost(sessionId:Int) {
         try {
             bassBoost?.release()
-            val strength=getSharedPreferences("musik_player",MODE_PRIVATE).getInt("bass_strength",500).coerceIn(0,1000)
-            bassBoost=android.media.audiofx.BassBoost(0,sessionId).apply{
+            val prefs=getSharedPreferences("musik_player",MODE_PRIVATE)
+            val strength=prefs.getInt("bass_strength",700).coerceIn(0,1000)
+            bassBoost=android.media.audiofx.BassBoost(0,sessionId).apply {
                 setStrength(strength.toShort())
-                enabled=strength>0
+                enabled=prefs.getBoolean("bass_enabled",true) && strength>0
             }
-        } catch (_:Exception) {
-            bassBoost=null
-            Toast.makeText(this,"Efek bass tidak didukung perangkat ini",Toast.LENGTH_SHORT).show()
+        } catch (_:Exception) { bassBoost=null }
+    }
+
+    private fun showBassSettings() {
+        val box=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(22),dp(18),dp(22),dp(12)); background=panelBg(Color.rgb(25,24,36),18) }
+        box.addView(label("BASS BOOST",18f,Color.WHITE,true))
+        box.addView(label("Perkuat suara bass saat musik diputar",12f,muted).apply{setPadding(0,dp(5),0,dp(14))})
+        val prefs=getSharedPreferences("musik_player",MODE_PRIVATE)
+        val enabled=CheckBox(this).apply { text="Aktifkan efek bass"; setTextColor(Color.WHITE); buttonTintList=android.content.res.ColorStateList.valueOf(accent); isChecked=prefs.getBoolean("bass_enabled",true) }
+        box.addView(enabled)
+        val value=label("${prefs.getInt("bass_strength",700)/10}%",13f,Color.WHITE,true).apply{gravity=Gravity.END}
+        box.addView(value)
+        val seek=SeekBar(this).apply { max=1000; progress=prefs.getInt("bass_strength",700).coerceIn(0,1000); progressTintList=android.content.res.ColorStateList.valueOf(accent); thumbTintList=android.content.res.ColorStateList.valueOf(accent) }
+        box.addView(seek)
+        fun applyBass() {
+            val strength=seek.progress
+            val on=enabled.isChecked && strength>0
+            prefs.edit().putInt("bass_strength",strength).putBoolean("bass_enabled",enabled.isChecked).apply()
+            value.text="${strength/10}%"
+            try {
+                if(player!=null) {
+                    val effect=bassBoost
+                    if(effect==null) setupBassBoost(player!!.audioSessionId)
+                    else { effect.setStrength(strength.toShort()); effect.enabled=on }
+                }
+            } catch (_:Exception) { Toast.makeText(this,"Perangkat tidak mendukung efek Bass Boost ini",Toast.LENGTH_SHORT).show() }
         }
+        enabled.setOnCheckedChangeListener { _,_->applyBass() }
+        seek.setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(s:SeekBar?,p:Int,fromUser:Boolean){if(fromUser)applyBass()}
+            override fun onStartTrackingTouch(s:SeekBar?){}
+            override fun onStopTrackingTouch(s:SeekBar?){}
+        })
+        AlertDialog.Builder(this).setView(box).setPositiveButton("Selesai",null).show().window?.setBackgroundDrawableResource(android.R.color.transparent)
     }
     private fun togglePlay(){val p=player;if(p==null){if(songs.isNotEmpty())playSong(0)}else if(p.isPlaying){p.pause();miniPlay.text="▶";updateMediaNotification(false)}else{p.start();miniPlay.text="Ⅱ";updateMediaNotification(true)}}
     private fun nextSong(){if(songs.isNotEmpty())playSong(if(current<0)0 else(current+1)%songs.size)}
