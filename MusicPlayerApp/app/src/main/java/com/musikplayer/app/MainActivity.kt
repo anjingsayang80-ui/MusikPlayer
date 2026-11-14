@@ -286,6 +286,19 @@ class MainActivity : Activity() {
         val progressKey="video_progress_${video.id}"
         var saveProgress:Runnable?=null
         val oldOrientation=requestedOrientation
+        // Match the screen orientation to the source video's dimensions.
+        val videoOrientation = try {
+            val retriever=android.media.MediaMetadataRetriever()
+            retriever.setDataSource(this,uri)
+            val width=retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+            val height=retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+            val rotation=retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+            retriever.release()
+            val isLandscape=if(rotation==90 || rotation==270) height>width else width>=height
+            if(isLandscape) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        } catch (_:Exception) {
+            ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
         videoView.setOnPreparedListener { mp ->
             if(Build.VERSION.SDK_INT>=21) {
                 try { mp.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING) } catch (_:Exception) {}
@@ -359,7 +372,7 @@ class MainActivity : Activity() {
             videoView.stopPlayback()
             requestedOrientation=oldOrientation
         }
-        requestedOrientation=ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        requestedOrientation=videoOrientation
         dialog.show()
         dialog.window?.apply {
             setLayout(-1,-1)
