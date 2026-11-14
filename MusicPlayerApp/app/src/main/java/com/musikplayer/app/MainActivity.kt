@@ -196,7 +196,10 @@ class MainActivity : Activity() {
         songs.add(0,item)
         getSharedPreferences("musik_player",MODE_PRIVATE).edit().putString("song_order",songs.joinToString(","){it.id.toString()}).apply()
         renderSongs(search.text.toString())
-        if(::musicScroll.isInitialized) musicScroll.post { musicScroll.smoothScrollTo(0,0) }
+        if(::musicScroll.isInitialized) musicScroll.post {
+            musicScroll.smoothScrollTo(0,0)
+            musicScroll.post { musicScroll.scrollTo(0,0) }
+        }
         Toast.makeText(this,"Lagu dipindahkan ke urutan pertama",Toast.LENGTH_SHORT).show()
     }
     private fun moveSong(from:Int, delta:Int) {
@@ -387,6 +390,10 @@ class MainActivity : Activity() {
             info.addView(label(song.artist,12f,muted).apply{maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END;setPadding(0,dp(3),0,dp(3))})
             info.addView(label(clock(song.duration)+"  •  "+sizeLabel(song.size),10f,muted))
             row.addView(info,LinearLayout.LayoutParams(0,-2,1f))
+            row.addView(centered("↑",20f,accent,true).apply {
+                contentDescription="Pindahkan ${song.title} ke urutan pertama"
+                setOnClickListener { moveSongToFirst(song) }
+            },LinearLayout.LayoutParams(dp(34),dp(52)))
             row.addView(centered("⋮",22f).apply{setOnClickListener{AlertDialog.Builder(this@MainActivity).setTitle(song.title).setItems(arrayOf("Putar sekarang","Pindahkan ke urutan pertama","Hapus dari daftar aplikasi","Hapus lagu dari HP")){_,which->val pos=songs.indexOf(song);when(which){0->playSong(pos);1->moveSongToFirst(song);2->hideSongFromLibrary(song);3->confirmDeleteSong(song)}}.show()}},LinearLayout.LayoutParams(dp(30),dp(52)))
             row.setOnLongClickListener {
                 val clip=android.content.ClipData.newPlainText("song_id",song.id.toString())
