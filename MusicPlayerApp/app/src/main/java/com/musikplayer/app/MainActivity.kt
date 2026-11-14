@@ -23,6 +23,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.provider.MediaStore
 import android.view.Gravity
+import android.util.Size
 import android.widget.*
 import java.util.concurrent.TimeUnit
 
@@ -92,7 +93,7 @@ class MainActivity : Activity() {
         brand.addView(centered("⌕",29f).apply { setOnClickListener { search.requestFocus(); (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).showSoftInput(search,0) } },LinearLayout.LayoutParams(dp(42),dp(44)))
         header.addView(brand)
         val tabs=LinearLayout(this).apply { gravity=Gravity.CENTER; setPadding(0,dp(14),0,dp(4)) }
-        listOf("Unduh","Video","Musik","Pribadi").forEach { name ->
+        listOf("Unduh","Video","Musik").forEach { name ->
             val t=centered(name,14f,if(name=="Musik") Color.WHITE else muted,name=="Musik").apply {
                 setPadding(dp(8),dp(10),dp(8),dp(10))
                 if(name=="Musik") background=GradientDrawable().apply { setColor(0x222D2140); setStroke(dp(1),accent); cornerRadius=dp(12).toFloat() }
@@ -141,8 +142,8 @@ class MainActivity : Activity() {
         val miniWrap=LinearLayout(this).apply { setPadding(dp(12),dp(4),dp(12),dp(6)); addView(mini) }; root.addView(miniWrap)
 
         val nav=LinearLayout(this).apply { gravity=Gravity.CENTER; setPadding(dp(8),dp(6),dp(8),dp(8)); setBackgroundColor(Color.rgb(20,21,28)) }
-        listOf("⌂\nRumah","♫\nMusik","▣\nGame","⇩\nFile Saya","♙\nSaya").forEachIndexed { i,item ->
-            nav.addView(centered(item,11f,if(i==1)accent else muted,i==1).apply { setOnClickListener { if(i!=1) Toast.makeText(this@MainActivity,"Menu segera hadir",Toast.LENGTH_SHORT).show() } },LinearLayout.LayoutParams(0,dp(48),1f))
+        listOf("♫\nMusik","⇩\nFile Saya").forEachIndexed { i,item ->
+            nav.addView(centered(item,11f,if(i==0)accent else muted,i==0),LinearLayout.LayoutParams(0,dp(48),1f))
         }
         root.addView(nav)
         setContentView(root)
@@ -194,12 +195,24 @@ class MainActivity : Activity() {
         if(shown.isEmpty()){ listBox.addView(centered("Belum ada video di HP",14f,muted).apply{setPadding(0,dp(40),0,dp(40))}); return }
         shown.forEach { video ->
             val row=LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL; setPadding(dp(10),dp(10),dp(10),dp(10)); background=panelBg() }
-            row.addView(centered("▶",25f,accent,true),LinearLayout.LayoutParams(dp(58),dp(54)))
+            val videoUri=ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,video.id)
+            val thumbnail=ImageView(this).apply {
+                scaleType=ImageView.ScaleType.CENTER_CROP
+                background=panelBg(Color.rgb(40,35,55),8)
+                clipToOutline=true
+                try {
+                    setImageBitmap(if(Build.VERSION.SDK_INT>=29) contentResolver.loadThumbnail(videoUri,Size(dp(150),dp(100)),null)
+                    else MediaStore.Video.Thumbnails.getThumbnail(contentResolver,video.id,MediaStore.Video.Thumbnails.MINI_KIND,null))
+                } catch (_:Exception) { setImageResource(R.drawable.app_icon) }
+            }
+            row.addView(thumbnail,LinearLayout.LayoutParams(dp(112),dp(76)))
             val info=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),0,0,0) }
-            info.addView(label(video.title,14f,Color.WHITE,true).apply{maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END})
-            info.addView(label(clock(video.duration)+"  •  "+sizeLabel(video.size),11f,muted).apply{setPadding(0,dp(4),0,0)})
+            info.addView(label(video.title,14f,Color.WHITE,true).apply{maxLines=2;ellipsize=android.text.TextUtils.TruncateAt.END})
+            info.addView(label(sizeLabel(video.size),11f,muted).apply{setPadding(0,dp(4),0,0)})
+            val watched=getSharedPreferences("musik_player",MODE_PRIVATE).getInt("video_progress_${video.id}",0)
+            info.addView(label("$watched% menonton",11f,muted).apply{setPadding(0,dp(5),0,0)})
             row.addView(info,LinearLayout.LayoutParams(0,-2,1f)); row.setOnClickListener{playVideo(video)}
-            val lp=LinearLayout.LayoutParams(-1,dp(72));lp.bottomMargin=dp(8);listBox.addView(row,lp)
+            val lp=LinearLayout.LayoutParams(-1,dp(96));lp.bottomMargin=dp(10);listBox.addView(row,lp)
         }
     }
     private fun playVideo(video:VideoItem) {
@@ -209,9 +222,36 @@ class MainActivity : Activity() {
         videoView.setMediaController(android.widget.MediaController(this).apply{setAnchorView(videoView)})
         val wrap=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(8),dp(8),dp(8),dp(8));addView(videoView,LinearLayout.LayoutParams(-1,dp(230)))}
         val dialog=AlertDialog.Builder(this).setTitle(video.title).setView(wrap).setPositiveButton("Tutup",null).create()
-        videoView.setOnPreparedListener{it.isLooping=false;videoView.start()}
-        videoView.setOnCompletionListener{videoView.seekTo(0)}
-        dialog.setOnDismissListener{videoView.stopPlayback()}
+        val progressKey="video_progress_${video.id}"
+        var saveProgress:Runnable?=null
+        videoView.setOnPreparedListener{
+            it.isLooping=false
+            val saved=getSharedPreferences("musik_player",MODE_PRIVATE).getInt(progressKey,0)
+            if(saved in 1..99) videoView.seekTo((video.duration*saved/100).toInt())
+            videoView.start()
+            saveProgress=object:Runnable{
+                override fun run(){
+                    if(videoView.isPlaying && video.duration>0){
+                        val percent=(videoView.currentPosition*100L/video.duration).toInt().coerceIn(0,99)
+                        getSharedPreferences("musik_player",MODE_PRIVATE).edit().putInt(progressKey,percent).apply()
+                    }
+                    handler.postDelayed(this,1000)
+                }
+            }
+            handler.post(saveProgress!!)
+        }
+        videoView.setOnCompletionListener{
+            getSharedPreferences("musik_player",MODE_PRIVATE).edit().putInt(progressKey,100).apply()
+            videoView.seekTo(0)
+        }
+        dialog.setOnDismissListener{
+            saveProgress?.let{handler.removeCallbacks(it)}
+            if(video.duration>0 && videoView.currentPosition>0 && videoView.currentPosition<video.duration){
+                val percent=(videoView.currentPosition*100L/video.duration).toInt().coerceIn(0,99)
+                getSharedPreferences("musik_player",MODE_PRIVATE).edit().putInt(progressKey,percent).apply()
+            }
+            videoView.stopPlayback()
+        }
         dialog.show()
     }
     private fun renderSongs(filter:String) {
