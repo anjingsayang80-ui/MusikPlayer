@@ -700,10 +700,15 @@ class MainActivity : Activity() {
             info.addView(label(song.artist,12f,muted).apply{maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END;setPadding(0,dp(3),0,dp(3))})
             info.addView(label(clock(song.duration)+"  •  "+sizeLabel(song.size),10f,muted))
             row.addView(info,LinearLayout.LayoutParams(0,-2,1f))
-            row.addView(centered("↑",20f,accent,true).apply {
-                contentDescription="Pindahkan ${song.title} ke urutan pertama"
+            val songNumber = songs.indexOf(song) + 1
+            row.addView(centered(songNumber.toString(),15f,accent,true).apply {
+                contentDescription="Nomor $songNumber. Ketuk untuk memindahkan lagu ke nomor 1"
                 setOnClickListener { moveSongToFirst(song) }
-            },LinearLayout.LayoutParams(dp(34),dp(52)))
+                background=GradientDrawable().apply {
+                    setColor(Color.rgb(48,35,65))
+                    cornerRadius=dp(10).toFloat()
+                }
+            },LinearLayout.LayoutParams(dp(38),dp(38)))
             row.addView(centered("⋮",22f).apply{setOnClickListener{AlertDialog.Builder(this@MainActivity).setTitle(song.title).setItems(arrayOf("Putar sekarang","Tambah ke daftar putar","Pindahkan ke urutan pertama","Hapus dari daftar aplikasi","Hapus lagu dari HP")){_,which->val pos=songs.indexOf(song);when(which){0->{playbackQueue=selectedPlaylistName?.let{playlistMap()[it]?.toMutableList()};playSong(pos)};1->addSongToPlaylist(song);2->moveSongToFirst(song);3->hideSongFromLibrary(song);4->confirmDeleteSong(song)}}.show()}},LinearLayout.LayoutParams(dp(30),dp(52)))
             row.setOnLongClickListener {
                 val clip=android.content.ClipData.newPlainText("song_id",song.id.toString())
