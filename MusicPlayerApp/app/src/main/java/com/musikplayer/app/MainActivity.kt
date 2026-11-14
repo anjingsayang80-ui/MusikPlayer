@@ -1154,6 +1154,31 @@ class MainActivity : Activity() {
         box.addView(ImageView(this).apply{scaleType=ImageView.ScaleType.CENTER_CROP;setImageDrawable(miniArt.drawable)},LinearLayout.LayoutParams(dp(210),dp(210)))
         box.addView(centered(s.title,19f,Color.WHITE,true).apply{setPadding(0,dp(18),0,dp(4))})
         box.addView(centered(s.artist,13f,muted))
+        val durationMs = (s.duration).coerceAtLeast(1L)
+        val timeLabels = LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL }
+        val elapsedLabel = label(clock(player?.currentPosition?.toLong() ?: 0L),11f,muted)
+        val remainingLabel = label(clock(durationMs),11f,muted).apply { gravity=Gravity.END }
+        timeLabels.addView(elapsedLabel,LinearLayout.LayoutParams(0,-2,1f))
+        timeLabels.addView(remainingLabel,LinearLayout.LayoutParams(0,-2,1f))
+        box.addView(timeLabels,LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(14) })
+        val positionBar = SeekBar(this).apply {
+            max=1000
+            progress=(((player?.currentPosition?.toLong() ?: 0L).coerceIn(0L,durationMs)*1000L)/durationMs).toInt()
+            progressTintList=android.content.res.ColorStateList.valueOf(accent)
+            thumbTintList=android.content.res.ColorStateList.valueOf(accent)
+            setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar:SeekBar?,progress:Int,fromUser:Boolean) {
+                    if(fromUser) {
+                        val target=durationMs*progress/1000L
+                        try { player?.seekTo(target.toInt()); elapsedLabel.text=clock(target) } catch (_:Exception) {}
+                        updateMediaNotification(player?.isPlaying==true)
+                    }
+                }
+                override fun onStartTrackingTouch(seekBar:SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar:SeekBar?) {}
+            })
+        }
+        box.addView(positionBar,LinearLayout.LayoutParams(-1,dp(32)))
         val controls=LinearLayout(this).apply{gravity=Gravity.CENTER}
         controls.addView(centered("|◀",27f).apply{setOnClickListener{if(songs.isNotEmpty())playSong(if(current<=0)songs.lastIndex else current-1)}},LinearLayout.LayoutParams(dp(65),dp(60)))
         controls.addView(centered(if(player?.isPlaying==true)"Ⅱ" else "▶",34f).apply{setOnClickListener{togglePlay();text=if(player?.isPlaying==true)"Ⅱ" else "▶"}},LinearLayout.LayoutParams(dp(70),dp(60)))
@@ -1207,7 +1232,24 @@ class MainActivity : Activity() {
             })
         }
         box.addView(bassValue);box.addView(bassBar)
-        AlertDialog.Builder(this).setView(box).setPositiveButton("Tutup",null).show().window?.setBackgroundDrawableResource(android.R.color.transparent)
+        val dialog=AlertDialog.Builder(this).setView(box).setPositiveButton("Tutup",null).create()
+        val positionTicker=object:Runnable {
+            override fun run() {
+                if(!dialog.isShowing)return
+                val active=player
+                if(active!=null && current in songs.indices && songs[current].id==s.id) {
+                    val pos=try { active.currentPosition.toLong().coerceIn(0L,durationMs) } catch (_:Exception) { 0L }
+                    elapsedLabel.text=clock(pos)
+                    remainingLabel.text=clock(durationMs)
+                    if(!positionBar.isPressed) positionBar.progress=(pos*1000L/durationMs).toInt()
+                }
+                handler.postDelayed(this,300)
+            }
+        }
+        dialog.setOnDismissListener { handler.removeCallbacks(positionTicker) }
+        dialog.show()
+        handler.post(positionTicker)
+        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
     }
 
     private fun showLyrics(song:Song) {
@@ -1308,6 +1350,14 @@ class MainActivity : Activity() {
                 override fun onPlay() { if (player == null && songs.isNotEmpty()) playSong(if (current < 0) 0 else current) else if (player?.isPlaying == false) togglePlay() }
                 override fun onPause() { if (player?.isPlaying == true) togglePlay() }
                 override fun onSkipToNext() { nextSong() }
+                override fun onSeekTo(pos:Long) {
+                    try {
+                        val active=player ?: return
+                        val target=pos.coerceIn(0L,active.duration.toLong())
+                        active.seekTo(target.toInt())
+                        updateMediaNotification(active.isPlaying)
+                    } catch (_:Exception) {}
+                }
                 override fun onSkipToPrevious() { if (songs.isNotEmpty()) { val q=playbackQueue; if(q.isNullOrEmpty()) playSong(if(current<=0)songs.lastIndex else current-1) else { val at=q.indexOf(songs.getOrNull(current)?.id); val id=q.getOrNull(if(at<=0) q.lastIndex else at-1); val ix=songs.indexOfFirst{it.id==id}; if(ix>=0)playSong(ix) } } }
             })
             isActive = true
