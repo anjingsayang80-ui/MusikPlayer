@@ -154,6 +154,11 @@ class MainActivity : Activity() {
                     if(name=="Unduh") {
                         showDownloadDialog()
                     } else {
+                        if(name=="Video" && (player?.isPlaying == true || PlaybackService.retainedPlayer?.isPlaying == true || player != null || PlaybackService.retainedPlayer != null)) {
+                            stopPlayback()
+                            nowTitle.text="Musik dihentikan"
+                            nowArtist.text="Video siap diputar"
+                        }
                         videoMode=name=="Video"
                         playAllButton.visibility=if(videoMode)android.view.View.GONE else android.view.View.VISIBLE
                         if(videoMode)renderVideos(search.text.toString()) else renderSongs(search.text.toString())
