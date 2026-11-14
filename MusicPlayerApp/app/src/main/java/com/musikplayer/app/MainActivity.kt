@@ -32,6 +32,8 @@ data class VideoItem(val id: Long, val title: String, val duration: Long, val si
 class MainActivity : Activity() {
     private val songs = mutableListOf<Song>()
     private var player: MediaPlayer? = null
+    private var bassBoost: android.media.audiofx.BassBoost? = null
+    private var playerVolume = 1.0f
     private var current = -1
     private lateinit var count: TextView
     private lateinit var nowTitle: TextView
@@ -235,6 +237,7 @@ class MainActivity : Activity() {
     }
 
     private fun deleteSong(song: Song) {
+        pendingDeleteSongId = song.id
         val uri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, song.id)
         try {
             if (Build.VERSION.SDK_INT >= 30) {
@@ -288,18 +291,32 @@ class MainActivity : Activity() {
         if(index !in songs.indices)return
         current=index
         try {
+            bassBoost?.release(); bassBoost = null
             player?.release()
             val s=songs[current]
             player=MediaPlayer().apply{
                 setDataSource(this@MainActivity,ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,s.id))
                 setOnCompletionListener{nextSong()}
-                setOnPreparedListener{mp->mp.start();miniPlay.text="Ⅱ"; updateMediaNotification(true)}
+                setOnPreparedListener{mp->\n                    mp.setVolume(playerVolume, playerVolume)\n                    setupBassBoost(mp.audioSessionId)\n                    mp.start();miniPlay.text="Ⅱ"; updateMediaNotification(true)\n                }
                 prepareAsync()
             }
             nowTitle.text=s.title;nowArtist.text=s.artist
             try{val u=ContentUris.withAppendedId(Uri.parse("content://media/external/audio/albumart"),s.albumId);contentResolver.openInputStream(u)?.use{miniArt.setImageBitmap(BitmapFactory.decodeStream(it))}?:miniArt.setImageResource(R.drawable.app_icon)}catch(_:Exception){miniArt.setImageResource(R.drawable.app_icon)}
             updateMediaNotification(false)
         }catch(_:Exception){Toast.makeText(this,"Tidak bisa memutar file ini",Toast.LENGTH_SHORT).show();nextSong()}
+    }
+    private fun setupBassBoost(sessionId:Int) {
+        try {
+            bassBoost?.release()
+            val strength=getSharedPreferences("musik_player",MODE_PRIVATE).getInt("bass_strength",500).coerceIn(0,1000)
+            bassBoost=android.media.audiofx.BassBoost(0,sessionId).apply{
+                setStrength(strength.toShort())
+                enabled=strength>0
+            }
+        } catch (_:Exception) {
+            bassBoost=null
+            Toast.makeText(this,"Efek bass tidak didukung perangkat ini",Toast.LENGTH_SHORT).show()
+        }
     }
     private fun togglePlay(){val p=player;if(p==null){if(songs.isNotEmpty())playSong(0)}else if(p.isPlaying){p.pause();miniPlay.text="▶";updateMediaNotification(false)}else{p.start();miniPlay.text="Ⅱ";updateMediaNotification(true)}}
     private fun nextSong(){if(songs.isNotEmpty())playSong(if(current<0)0 else(current+1)%songs.size)}
@@ -315,6 +332,47 @@ class MainActivity : Activity() {
         controls.addView(centered(if(player?.isPlaying==true)"Ⅱ" else "▶",34f).apply{setOnClickListener{togglePlay();text=if(player?.isPlaying==true)"Ⅱ" else "▶"}},LinearLayout.LayoutParams(dp(70),dp(60)))
         controls.addView(centered("▶|",27f).apply{setOnClickListener{nextSong()}},LinearLayout.LayoutParams(dp(65),dp(60)))
         box.addView(controls)
+
+        box.addView(label("VOLUME",12f,muted,true).apply{setPadding(0,dp(16),0,dp(2))})
+        val volumeValue=TextView(this).apply{text= "${(playerVolume*100).toInt()}%";setTextColor(Color.WHITE);textSize=12f;gravity=Gravity.END}
+        val volumeBar=SeekBar(this).apply{
+            max=100
+            progress=(playerVolume*100).toInt()
+            progressTintList=android.content.res.ColorStateList.valueOf(accent)
+            thumbTintList=android.content.res.ColorStateList.valueOf(accent)
+            setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener{
+                override fun onProgressChanged(seekBar:SeekBar?,progress:Int,fromUser:Boolean){
+                    if(fromUser){playerVolume=progress/100f;player?.setVolume(playerVolume,playerVolume);volumeValue.text="$progress%"}
+                }
+                override fun onStartTrackingTouch(seekBar:SeekBar?){}
+                override fun onStopTrackingTouch(seekBar:SeekBar?){}
+            })
+        }
+        val volumeRow=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
+        volumeRow.addView(volumeValue);volumeRow.addView(volumeBar)
+        box.addView(volumeRow,LinearLayout.LayoutParams(-1,-2))
+
+        box.addView(label("BASS BOOST",12f,muted,true).apply{setPadding(0,dp(12),0,dp(2))})
+        val savedBass=getSharedPreferences("musik_player",MODE_PRIVATE).getInt("bass_strength",500)
+        val bassValue=TextView(this).apply{text="${(savedBass/10)}%";setTextColor(Color.WHITE);textSize=12f;gravity=Gravity.END}
+        val bassBar=SeekBar(this).apply{
+            max=1000
+            progress=savedBass
+            progressTintList=android.content.res.ColorStateList.valueOf(accent)
+            thumbTintList=android.content.res.ColorStateList.valueOf(accent)
+            setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener{
+                override fun onProgressChanged(seekBar:SeekBar?,progress:Int,fromUser:Boolean){
+                    if(fromUser){
+                        bassValue.text="${progress/10}%"
+                        getSharedPreferences("musik_player",MODE_PRIVATE).edit().putInt("bass_strength",progress).apply()
+                        try{bassBoost?.setStrength(progress.toShort());bassBoost?.enabled=progress>0}catch(_:Exception){}
+                    }
+                }
+                override fun onStartTrackingTouch(seekBar:SeekBar?){}
+                override fun onStopTrackingTouch(seekBar:SeekBar?){}
+            })
+        }
+        box.addView(bassValue);box.addView(bassBar)
         AlertDialog.Builder(this).setView(box).setPositiveButton("Tutup",null).show().window?.setBackgroundDrawableResource(android.R.color.transparent)
     }
 
@@ -391,5 +449,5 @@ class MainActivity : Activity() {
 
     private fun clock(ms:Long)=String.format("%d:%02d",TimeUnit.MILLISECONDS.toMinutes(ms),TimeUnit.MILLISECONDS.toSeconds(ms)%60)
     private fun sizeLabel(bytes:Long)=if(bytes>=1048576)String.format("%.1f MB",bytes/1048576.0) else (bytes/1024).toString()+" KB"
-    override fun onDestroy(){ticker?.let{handler.removeCallbacks(it)};player?.release();player=null;mediaSession?.isActive=false;mediaSession?.release();mediaSession=null;notificationManager.cancel(77);super.onDestroy()}
+    override fun onDestroy(){ticker?.let{handler.removeCallbacks(it)};bassBoost?.release();bassBoost=null;player?.release();player=null;mediaSession?.isActive=false;mediaSession?.release();mediaSession=null;notificationManager.cancel(77);super.onDestroy()}
 }
