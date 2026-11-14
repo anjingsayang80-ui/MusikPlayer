@@ -1155,7 +1155,7 @@ class MainActivity : Activity() {
                 val lines=text.lines()
                 val position=player?.takeIf{current in songs.indices && songs[current].id==song.id}?.currentPosition ?: 0
                 val timed=lines.mapNotNull { line ->
-                    val match=Regex("""\\[(\\d{1,2}):(\\d{2})(?:[.](\\d{1,3}))?]""").find(line)
+                    val match=Regex("""\[(\d{1,2}):(\d{2})(?:[.](\d{1,3}))?]""").find(line)
                     if(match==null)null else {
                         val min=match.groupValues[1].toLongOrNull()?:0L
                         val sec=match.groupValues[2].toLongOrNull()?:0L
@@ -1178,7 +1178,7 @@ class MainActivity : Activity() {
 
     private fun updateLyricsPreview(text:String,target:TextView) {
         val timed=text.lines().mapNotNull { line ->
-            val match=Regex("""\\[(\\d{1,2}):(\\d{2})(?:[.](\\d{1,3}))?]""").find(line)
+                    val match=Regex("""\[(\d{1,2}):(\d{2})(?:[.](\d{1,3}))?]""").find(line)
             if(match==null)null else {
                 val min=match.groupValues[1].toLongOrNull()?:0L
                 val sec=match.groupValues[2].toLongOrNull()?:0L
