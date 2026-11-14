@@ -35,6 +35,7 @@ class PlaybackService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
+        @Volatile var retainedPlayer: android.media.MediaPlayer? = null
         const val CHANNEL = "musik_background_playback"
     }
 }
