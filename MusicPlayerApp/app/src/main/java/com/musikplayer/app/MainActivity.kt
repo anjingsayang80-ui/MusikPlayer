@@ -7,6 +7,7 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.DownloadManager
 import android.content.Intent
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
@@ -21,6 +22,7 @@ import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.os.Handler
 import android.provider.MediaStore
 import android.view.Gravity
@@ -64,6 +66,8 @@ class MainActivity : Activity() {
     private val actionPrevious = "com.musikplayer.app.PREVIOUS"
     private val actionToggle = "com.musikplayer.app.TOGGLE"
     private val actionNext = "com.musikplayer.app.NEXT"
+    private var pendingDownloadUrl: String? = null
+    private var pendingDownloadVideo = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -76,6 +80,13 @@ class MainActivity : Activity() {
     private fun hasPermission() = Build.VERSION.SDK_INT < 23 || checkSelfPermission(permission()) == PackageManager.PERMISSION_GRANTED
     override fun onRequestPermissionsResult(r: Int, p: Array<out String>, g: IntArray) {
         super.onRequestPermissionsResult(r,p,g)
+        if (r == 43) {
+            val url = pendingDownloadUrl
+            pendingDownloadUrl = null
+            if (g.isNotEmpty() && g[0] == PackageManager.PERMISSION_GRANTED && url != null) startDownload(url, pendingDownloadVideo)
+            else Toast.makeText(this, "Izin penyimpanan diperlukan untuk mengunduh file", Toast.LENGTH_LONG).show()
+            return
+        }
         if (r == 41 && g.isNotEmpty() && g[0] == PackageManager.PERMISSION_GRANTED) showLibrary()
         else if (r == 42) { /* Notifikasi opsional; pemutar tetap bisa digunakan. */ }
         else setContentView(label("Izinkan akses musik agar semua lagu di HP bisa ditemukan.",17f,Color.WHITE).apply { gravity=Gravity.CENTER })
@@ -105,19 +116,21 @@ class MainActivity : Activity() {
                 setPadding(dp(8),dp(10),dp(8),dp(10))
                 if(name=="Musik") background=GradientDrawable().apply { setColor(0x222D2140); setStroke(dp(1),accent); cornerRadius=dp(12).toFloat() }
                 setOnClickListener {
-                    if(name=="Video" || name=="Musik") {
-                        selectedTab=name
-                        tabsLoop@ for(i in 0 until tabs.childCount) {
-                            val tab=tabs.getChildAt(i) as TextView
-                            val active=tab.text.toString()==selectedTab
-                            tab.setTextColor(if(active)Color.WHITE else muted)
-                            tab.typeface=if(active)Typeface.DEFAULT_BOLD else Typeface.DEFAULT
-                            tab.background=if(active) GradientDrawable().apply { setColor(0x222D2140); setStroke(dp(1),accent); cornerRadius=dp(12).toFloat() } else null
-                        }
+                    selectedTab=name
+                    for(i in 0 until tabs.childCount) {
+                        val tab=tabs.getChildAt(i) as TextView
+                        val active=tab.text.toString()==selectedTab
+                        tab.setTextColor(if(active)Color.WHITE else muted)
+                        tab.typeface=if(active)Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+                        tab.background=if(active) GradientDrawable().apply { setColor(0x222D2140); setStroke(dp(1),accent); cornerRadius=dp(12).toFloat() } else null
+                    }
+                    if(name=="Unduh") {
+                        showDownloadDialog()
+                    } else {
                         videoMode=name=="Video"
                         playAllButton.visibility=if(videoMode)android.view.View.GONE else android.view.View.VISIBLE
                         if(videoMode)renderVideos(search.text.toString()) else renderSongs(search.text.toString())
-                    } else Toast.makeText(this@MainActivity,"Bagian $name segera hadir",Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
             tabs.addView(t,LinearLayout.LayoutParams(0,dp(42),1f))
@@ -168,6 +181,99 @@ class MainActivity : Activity() {
         renderSongs("")
         ticker=object:Runnable { override fun run(){ if(player?.isPlaying==true) miniPlay.text="Ⅱ"; handler.postDelayed(this,700) } }
         handler.post(ticker!!)
+    }
+
+    private fun showDownloadDialog() {
+        val box=LinearLayout(this).apply {
+            orientation=LinearLayout.VERTICAL
+            setPadding(dp(20),dp(14),dp(20),dp(8))
+            background=panelBg(Color.rgb(25,24,36),18)
+        }
+        box.addView(label("Tempel tautan langsung file musik atau video",13f,muted).apply { setPadding(0,0,0,dp(10)) })
+        val urlInput=EditText(this).apply {
+            hint="https://contoh.com/file.mp3"
+            setHintTextColor(muted)
+            setTextColor(Color.WHITE)
+            textSize=14f
+            inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
+            setSingleLine(true)
+            setPadding(dp(12),0,dp(12),0)
+            background=panelBg(Color.rgb(39,38,51),10)
+        }
+        box.addView(urlInput,LinearLayout.LayoutParams(-1,dp(48)))
+        box.addView(label("Simpan sebagai",12f,muted).apply { setPadding(0,dp(16),0,dp(6)) })
+        val group=RadioGroup(this).apply { orientation=RadioGroup.HORIZONTAL }
+        val musicChoice=RadioButton(this).apply { text="Musik"; setTextColor(Color.WHITE); id=android.view.View.generateViewId(); isChecked=true; buttonTintList=android.content.res.ColorStateList.valueOf(accent) }
+        val videoChoice=RadioButton(this).apply { text="Video"; setTextColor(Color.WHITE); id=android.view.View.generateViewId(); buttonTintList=android.content.res.ColorStateList.valueOf(accent) }
+        group.addView(musicChoice); group.addView(videoChoice)
+        box.addView(group)
+        box.addView(label("File akan masuk ke folder Music atau Movies. Gunakan tautan unduhan langsung (HTTP/HTTPS).",11f,muted).apply { setPadding(0,dp(8),0,0) })
+        val dialog=AlertDialog.Builder(this)
+            .setTitle("Unduh Musik / Video")
+            .setView(box)
+            .setNegativeButton("Batal",null)
+            .setPositiveButton("Mulai unduh",null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val link=urlInput.text.toString().trim()
+                if(link.isBlank()) {
+                    urlInput.error="Masukkan tautan unduhan"
+                    return@setOnClickListener
+                }
+                startDownload(link,videoChoice.isChecked)
+                dialog.dismiss()
+            }
+        }
+        dialog.show()
+        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+    }
+
+    private fun startDownload(link:String, video:Boolean) {
+        val uri=try { Uri.parse(link) } catch (_:Exception) { null }
+        if(uri==null || uri.host.isNullOrBlank() || (uri.scheme!="http" && uri.scheme!="https")) {
+            Toast.makeText(this,"Tautan harus diawali http:// atau https://",Toast.LENGTH_LONG).show()
+            return
+        }
+        if(Build.VERSION.SDK_INT<29 && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE)!=PackageManager.PERMISSION_GRANTED) {
+            pendingDownloadUrl=link
+            pendingDownloadVideo=video
+            requestPermissions(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE),43)
+            return
+        }
+        try {
+            var fileName=Uri.decode(uri.lastPathSegment.orEmpty()).substringAfterLast('/').trim()
+            fileName=fileName.replace(Regex("[^A-Za-z0-9._-]"),"_").take(100)
+            if(fileName.isBlank() || fileName=="." || fileName=="..") fileName=if(video)"video.mp4" else "musik.mp3"
+            if(!fileName.contains('.')) fileName+=if(video)".mp4" else ".mp3"
+            val extension=fileName.substringAfterLast("","").lowercase(java.util.Locale.ROOT)
+            val mime=when(extension) {
+                "mp3"->"audio/mpeg"
+                "m4a"->"audio/mp4"
+                "aac"->"audio/aac"
+                "wav"->"audio/wav"
+                "ogg"->"audio/ogg"
+                "flac"->"audio/flac"
+                "mp4"->"video/mp4"
+                "mkv"->"video/x-matroska"
+                "webm"->"video/webm"
+                "3gp"->"video/3gpp"
+                else->if(video)"video/*" else "audio/*"
+            }
+            val request=DownloadManager.Request(uri)
+                .setTitle(fileName)
+                .setDescription(if(video)"Mengunduh video ke folder Movies" else "Mengunduh musik ke folder Music")
+                .setMimeType(mime)
+                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                .setAllowedOverMetered(true)
+                .setAllowedOverRoaming(false)
+                .setDestinationInExternalPublicDir(if(video)Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_MUSIC,fileName)
+            val manager=getSystemService(DOWNLOAD_SERVICE) as DownloadManager
+            manager.enqueue(request)
+            Toast.makeText(this,"Unduhan dimulai: $fileName",Toast.LENGTH_LONG).show()
+        } catch (e:Exception) {
+            Toast.makeText(this,"Gagal memulai unduhan: ${e.message ?: "periksa tautan"}",Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun loadSongs() {
