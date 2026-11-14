@@ -274,7 +274,7 @@ class MainActivity : Activity() {
             row.setOnLongClickListener {
                 val clip=android.content.ClipData.newPlainText("song_id",song.id.toString())
                 if(Build.VERSION.SDK_INT>=24) row.startDragAndDrop(clip,android.view.View.DragShadowBuilder(row),song,0)
-                else @Suppress("DEPRECATION") row.startDrag(clip,android.view.View.DragShadowBuilder(row),song,0)
+                else { row.startDrag(clip,android.view.View.DragShadowBuilder(row),song,0) }
                 true
             }
             row.setOnDragListener { target,event ->
