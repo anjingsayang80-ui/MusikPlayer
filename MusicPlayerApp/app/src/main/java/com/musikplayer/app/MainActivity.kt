@@ -12,6 +12,7 @@ import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.content.ContentUris
 import android.content.pm.PackageManager
+import android.content.pm.ActivityInfo
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Typeface
@@ -279,10 +280,13 @@ class MainActivity : Activity() {
         }
         val progressKey="video_progress_${video.id}"
         var saveProgress:Runnable?=null
-        videoView.setOnPreparedListener {
-            it.isLooping=false
+        val oldOrientation=requestedOrientation
+        videoView.setOnPreparedListener { mp ->
+            if(Build.VERSION.SDK_INT>=21) {
+                try { mp.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING) } catch (_:Exception) {}
+            }
             val saved=getSharedPreferences("musik_player",MODE_PRIVATE).getInt(progressKey,0)
-            if(saved in 1..99) videoView.seekTo((video.duration*saved/100).toInt())
+            if(saved in 1..99 && video.duration>0) videoView.seekTo((video.duration*saved/100).toInt())
             videoView.start()
             controller.show(2500)
             saveProgress=object:Runnable {
@@ -300,8 +304,9 @@ class MainActivity : Activity() {
             getSharedPreferences("musik_player",MODE_PRIVATE).edit().putInt(progressKey,100).apply()
             videoView.seekTo(0)
         }
-        var lastSeekPosition=0
-        var longPressHandled=false
+        var startSeekPosition=0
+        var startTouchX=0f
+        var moved=false
         val gesture=android.view.GestureDetector(this,object:android.view.GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e:android.view.MotionEvent)=true
             override fun onSingleTapConfirmed(e:android.view.MotionEvent):Boolean {
@@ -310,34 +315,34 @@ class MainActivity : Activity() {
             }
             override fun onDoubleTap(e:android.view.MotionEvent):Boolean {
                 val jump=if(e.x<videoView.width/2) -20000 else 20000
-                val target=(videoView.currentPosition+jump).coerceIn(0,videoView.duration.coerceAtLeast(0))
-                videoView.seekTo(target)
+                val duration=videoView.duration.coerceAtLeast(0)
+                videoView.seekTo((videoView.currentPosition+jump).coerceIn(0,duration))
                 Toast.makeText(this@MainActivity,if(jump<0)"Mundur 20 detik" else "Maju 20 detik",Toast.LENGTH_SHORT).show()
                 return true
             }
             override fun onLongPress(e:android.view.MotionEvent) {
                 val jump=if(e.x<videoView.width/2) -10000 else 10000
                 videoView.seekTo((videoView.currentPosition+jump).coerceIn(0,videoView.duration.coerceAtLeast(0)))
-                longPressHandled=true
                 Toast.makeText(this@MainActivity,if(jump<0)"Mundur 10 detik" else "Maju 10 detik",Toast.LENGTH_SHORT).show()
             }
             override fun onScroll(e1:android.view.MotionEvent?,e2:android.view.MotionEvent,dx:Float,dy:Float):Boolean {
-                if(e1==null || kotlin.math.abs(e2.x-e1.x)<dp(12)) return false
-                val delta=(-(e2.x-e1.x)*250).toInt()
-                val target=(lastSeekPosition+delta).coerceIn(0,videoView.duration.coerceAtLeast(0))
-                videoView.seekTo(target)
+                if(e1==null || kotlin.math.abs(e2.x-e1.x)<dp(10)) return false
+                moved=true
+                val delta=(e2.x-startTouchX).toInt()*250
+                val duration=videoView.duration.coerceAtLeast(0)
+                videoView.seekTo((startSeekPosition+delta).coerceIn(0,duration))
                 return true
             }
         })
         videoView.setOnTouchListener { _,event ->
-            if(event.action==android.view.MotionEvent.ACTION_DOWN) {
-                lastSeekPosition=videoView.currentPosition
-                longPressHandled=false
+            when(event.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    startSeekPosition=videoView.currentPosition
+                    startTouchX=event.x
+                    moved=false
+                }
             }
             gesture.onTouchEvent(event)
-            if(event.action==android.view.MotionEvent.ACTION_UP && !longPressHandled) {
-                // GestureDetector menangani ketuk tunggal, ketuk dua kali, dan seret.
-            }
             true
         }
         dialog.setOnDismissListener {
@@ -347,14 +352,18 @@ class MainActivity : Activity() {
                 getSharedPreferences("musik_player",MODE_PRIVATE).edit().putInt(progressKey,percent).apply()
             }
             videoView.stopPlayback()
+            requestedOrientation=oldOrientation
         }
+        requestedOrientation=ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         dialog.show()
         dialog.window?.apply {
             setLayout(-1,-1)
             addFlags(android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN)
             addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
+        videoView.setVideoURI(uri)
     }
+
     private fun renderSongs(filter:String) {
         if(!::listBox.isInitialized)return
         listBox.removeAllViews()
@@ -592,18 +601,22 @@ class MainActivity : Activity() {
     private fun setupBassBoost(sessionId:Int) {
         try {
             bassBoost?.release()
+            bassBoost=null
+            if(sessionId<=0) return
             val prefs=getSharedPreferences("musik_player",MODE_PRIVATE)
             val strength=prefs.getInt("bass_strength",700).coerceIn(0,1000)
             val effect=android.media.audiofx.BassBoost(0,sessionId)
             if(!effect.hasControl()) {
                 effect.release()
-                bassBoost=null
                 return
             }
             effect.setStrength(strength.toShort())
-            effect.enabled=prefs.getBoolean("bass_enabled",true) && strength>0
+            effect.setEnabled(prefs.getBoolean("bass_enabled",true) && strength>0)
             bassBoost=effect
-        } catch (_:Exception) { bassBoost=null }
+        } catch (_:Exception) {
+            bassBoost?.release()
+            bassBoost=null
+        }
     }
 
     private fun showBassSettings() {
@@ -625,12 +638,11 @@ class MainActivity : Activity() {
             try {
                 if(player!=null) {
                     val effect=bassBoost
-                    if(effect==null) setupBassBoost(player!!.audioSessionId)
-                    else {
-                        if(effect.hasControl()) {
-                            effect.setStrength(strength.toShort())
-                            effect.enabled=on
-                        } else Toast.makeText(this,"Efek bass sedang dikendalikan sistem audio",Toast.LENGTH_SHORT).show()
+                    if(effect==null || !effect.hasControl()) {
+                        setupBassBoost(player!!.audioSessionId)
+                    } else {
+                        effect.setStrength(strength.toShort())
+                        effect.setEnabled(on)
                     }
                 } else {
                     Toast.makeText(this,"Putar musik dulu agar efek bass bisa diterapkan",Toast.LENGTH_SHORT).show()
