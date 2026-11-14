@@ -70,6 +70,7 @@ class MainActivity : Activity() {
     private var pendingDownloadUrl: String? = null
     private var pendingDownloadVideo = false
     private var playbackGeneration = 0L
+    private var activeVideoDialog: android.app.Dialog? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -93,6 +94,30 @@ class MainActivity : Activity() {
         else if (r == 42) { /* Notifikasi opsional; pemutar tetap bisa digunakan. */ }
         else setContentView(label("Izinkan akses musik agar semua lagu di HP bisa ditemukan.",17f,Color.WHITE).apply { gravity=Gravity.CENTER })
     }
+    private fun setVideoNavigationHidden(dialog: android.app.Dialog, hidden: Boolean) {
+        val decor = dialog.window?.decorView ?: return
+        decor.systemUiVisibility = if (hidden) {
+            android.view.View.SYSTEM_UI_FLAG_FULLSCREEN or
+                android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+                android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+        } else {
+            android.view.View.SYSTEM_UI_FLAG_VISIBLE
+        }
+    }
+
+    override fun onPause() {
+        activeVideoDialog?.let { setVideoNavigationHidden(it, false) }
+        super.onPause()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        activeVideoDialog?.takeIf { it.isShowing }?.let { setVideoNavigationHidden(it, true) }
+    }
+
     private fun dp(v:Int)=(v*resources.displayMetrics.density).toInt()
     private fun panelBg(color:Int=panel,r:Int=14)=GradientDrawable().apply { setColor(color); cornerRadius=dp(r).toFloat() }
     private fun label(s:String,size:Float,color:Int=Color.WHITE,bold:Boolean=false)=TextView(this).apply { text=s; textSize=size; setTextColor(color); if(bold)setTypeface(null,Typeface.BOLD) }
@@ -593,6 +618,8 @@ class MainActivity : Activity() {
             true
         }
         dialog.setOnDismissListener {
+            setVideoNavigationHidden(dialog, false)
+            if (activeVideoDialog === dialog) activeVideoDialog = null
             saveProgress?.let{handler.removeCallbacks(it)}
             if(video.duration>0 && videoView.currentPosition>0 && videoView.currentPosition<video.duration) {
                 val percent=(videoView.currentPosition*100L/video.duration).toInt().coerceIn(0,99)
@@ -603,11 +630,13 @@ class MainActivity : Activity() {
         }
         requestedOrientation=videoOrientation
         dialog.show()
+        activeVideoDialog = dialog
         dialog.window?.apply {
             setLayout(-1,-1)
             addFlags(android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN)
             addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
+        setVideoNavigationHidden(dialog, true)
         videoView.setVideoURI(uri)
     }
 
