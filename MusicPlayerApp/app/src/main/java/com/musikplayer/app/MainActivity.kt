@@ -153,13 +153,21 @@ class MainActivity : Activity() {
 
     private fun loadSongs() {
         songs.clear()
-        val cols=arrayOf(MediaStore.Audio.Media._ID,MediaStore.Audio.Media.TITLE,MediaStore.Audio.Media.ARTIST,MediaStore.Audio.Media.ALBUM_ID,MediaStore.Audio.Media.DURATION,MediaStore.Audio.Media.SIZE)
+        val cols=arrayOf(MediaStore.Audio.Media._ID,MediaStore.Audio.Media.TITLE,MediaStore.Audio.Media.ARTIST,MediaStore.Audio.Media.ALBUM_ID,MediaStore.Audio.Media.DURATION,MediaStore.Audio.Media.SIZE,MediaStore.Audio.Media.DATA)
+        val uniqueSongs = LinkedHashMap<String, Song>()
         contentResolver.query(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,cols,MediaStore.Audio.Media.IS_MUSIC+" != 0",null,MediaStore.Audio.Media.TITLE+" COLLATE NOCASE ASC")?.use { c ->
             val id=c.getColumnIndexOrThrow(MediaStore.Audio.Media._ID); val title=c.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
             val artist=c.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST); val album=c.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
             val duration=c.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION); val size=c.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE)
-            while(c.moveToNext()) songs.add(Song(c.getLong(id),c.getString(title)?:"Tanpa judul",c.getString(artist)?:"Artis tidak diketahui",c.getLong(album),c.getLong(duration),c.getLong(size)))
+            val data=c.getColumnIndex(MediaStore.Audio.Media.DATA)
+            while(c.moveToNext()) {
+                val song=Song(c.getLong(id),c.getString(title)?:"Tanpa judul",c.getString(artist)?:"Artis tidak diketahui",c.getLong(album),c.getLong(duration),c.getLong(size))
+                val path=if(data>=0) c.getString(data)?.trim()?.lowercase().orEmpty() else ""
+                val key=if(path.isNotBlank()) path else "${song.title.trim().lowercase()}|${song.artist.trim().lowercase()}|${song.duration}|${song.size}"
+                if(!uniqueSongs.containsKey(key)) uniqueSongs[key]=song
+            }
         }
+        songs.addAll(uniqueSongs.values)
         val saved = getSharedPreferences("musik_player", MODE_PRIVATE).getString("song_order", "").orEmpty().split(",").filter { it.isNotBlank() }.mapNotNull { it.toLongOrNull() }
         if (saved.isNotEmpty()) { val byId = songs.associateBy { it.id }; val ordered = saved.mapNotNull { byId[it] }.toMutableList(); songs.filter { it.id !in saved }.forEach { ordered.add(it) }; songs.clear(); songs.addAll(ordered) }
     }
