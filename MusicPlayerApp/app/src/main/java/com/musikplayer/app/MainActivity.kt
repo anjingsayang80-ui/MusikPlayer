@@ -285,7 +285,7 @@ class MainActivity : Activity() {
                 throw Exception("Tautan bukan file ${if(video)"video" else "audio"} (tipe: ${rawType.ifBlank{"tidak diketahui"}}). Gunakan tautan file langsung.")
             }
             val disposition=connection.getHeaderField("Content-Disposition").orEmpty()
-            val fromHeader=Regex("(?i)filename\*?=(?:UTF-8''|\")?([^;\"\r\n]+)").find(disposition)?.groupValues?.get(1)?.trim()?.trim('"')
+            val fromHeader=Regex("""(?i)filename\*?=(?:UTF-8''|")?([^;"\r\n]+)""").find(disposition)?.groupValues?.get(1)?.trim()?.trim('"')
             val fromUrl=Uri.parse(connection.url.toString()).lastPathSegment
             var name=(fromHeader ?: fromUrl ?: "").substringAfterLast('/').trim()
             name=try { java.net.URLDecoder.decode(name,"UTF-8") } catch (_:Exception) { name }
