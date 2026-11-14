@@ -220,7 +220,7 @@ Saya").forEachIndexed { i,item ->
         shown.forEach { song ->
             val row=LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL; setPadding(dp(8),dp(7),dp(8),dp(7)); background=panelBg() }
             val art=ImageView(this).apply { scaleType=ImageView.ScaleType.CENTER_CROP; background=panelBg(Color.rgb(40,35,55),10); clipToOutline=true; setImageResource(R.drawable.app_icon) }
-            try { val u=ContentUris.withAppendedId(Uri.parse("content://media/external/audio/albumart"),song.albumId); contentResolver.openInputStream(u)?.use{art.setImageBitmap(BitmapFactory.decodeStream(it))} }catch(_:Exception){}
+            art.setImageBitmap(loadSongArtwork(song))
             row.addView(art,LinearLayout.LayoutParams(dp(58),dp(58)))
             val info=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),0,dp(5),0) }
             info.addView(label(song.title,14f,Color.WHITE,true).apply{maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END})
@@ -292,6 +292,28 @@ Saya").forEachIndexed { i,item ->
 
     private var pendingDeleteSongId: Long = -1L
 
+    private fun loadSongArtwork(song: Song): android.graphics.Bitmap? {
+        try {
+            val albumUri = ContentUris.withAppendedId(Uri.parse("content://media/external/audio/albumart"), song.albumId)
+            contentResolver.openInputStream(albumUri)?.use { stream ->
+                BitmapFactory.decodeStream(stream)?.let { return it }
+            }
+        } catch (_: Exception) {}
+
+        try {
+            val audioUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, song.id)
+            val retriever = android.media.MediaMetadataRetriever()
+            try {
+                retriever.setDataSource(this, audioUri)
+                val picture = retriever.embeddedPicture
+                if (picture != null) return BitmapFactory.decodeByteArray(picture, 0, picture.size)
+            } finally {
+                retriever.release()
+            }
+        } catch (_: Exception) {}
+        return null
+    }
+
     private fun playSong(index:Int) {
         if(index !in songs.indices)return
         current=index
@@ -310,7 +332,7 @@ Saya").forEachIndexed { i,item ->
                 prepareAsync()
             }
             nowTitle.text=s.title;nowArtist.text=s.artist
-            try{val u=ContentUris.withAppendedId(Uri.parse("content://media/external/audio/albumart"),s.albumId);contentResolver.openInputStream(u)?.use{miniArt.setImageBitmap(BitmapFactory.decodeStream(it))}?:miniArt.setImageResource(R.drawable.app_icon)}catch(_:Exception){miniArt.setImageResource(R.drawable.app_icon)}
+            miniArt.setImageBitmap(loadSongArtwork(s))
             updateMediaNotification(false)
         }catch(_:Exception){Toast.makeText(this,"Tidak bisa memutar file ini",Toast.LENGTH_SHORT).show();nextSong()}
     }
