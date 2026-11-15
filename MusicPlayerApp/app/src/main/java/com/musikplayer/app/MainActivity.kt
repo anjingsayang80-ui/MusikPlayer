@@ -473,6 +473,18 @@ class MainActivity : Activity() {
     }
 
     private fun playVideo(video:VideoItem) {
+        val videoList=mutableListOf<VideoItem>()
+        val videoCols=arrayOf(MediaStore.Video.Media._ID,MediaStore.Video.Media.TITLE,MediaStore.Video.Media.DURATION,MediaStore.Video.Media.SIZE)
+        try {
+            contentResolver.query(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,videoCols,null,null,MediaStore.Video.Media.TITLE+" COLLATE NOCASE ASC")?.use { cur ->
+                val idCol=cur.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
+                val titleCol=cur.getColumnIndexOrThrow(MediaStore.Video.Media.TITLE)
+                val durationCol=cur.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION)
+                val sizeCol=cur.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE)
+                while(cur.moveToNext()) videoList.add(VideoItem(cur.getLong(idCol),cur.getString(titleCol)?:"Video tanpa judul",cur.getLong(durationCol),cur.getLong(sizeCol)))
+            }
+        } catch (_:Exception) {}
+        val videoIndex=videoList.indexOfFirst { it.id==video.id }
         val uri=ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,video.id)
         // Ambil ukuran asli video dari metadata; VideoView tidak membuka videoWidth/videoHeight.
         val (sourceWidth,sourceHeight)=try {
@@ -523,7 +535,52 @@ class MainActivity : Activity() {
         zoomBar.addView(centered("−",24f).apply { setPadding(dp(10),0,dp(10),0); setOnClickListener { applyVideoZoom(videoZoom-0.25f) } })
         zoomBar.addView(centered("1×",13f,Color.WHITE,true).apply { setPadding(dp(8),0,dp(8),0); setOnClickListener { applyVideoZoom(1f) } })
         zoomBar.addView(centered("+",24f).apply { setPadding(dp(10),0,dp(10),0); setOnClickListener { applyVideoZoom(videoZoom+0.25f) } })
-        frame.addView(zoomBar,FrameLayout.LayoutParams(-2,dp(42),Gravity.TOP or Gravity.END).apply { topMargin=dp(16); rightMargin=dp(14) })
+        val videoSwitch=LinearLayout(this).apply {
+            orientation=LinearLayout.HORIZONTAL
+            gravity=Gravity.CENTER
+            setPadding(dp(6),dp(4),dp(6),dp(4))
+            background=panelBg(Color.argb(190,18,18,26),12)
+        }
+        val previousVideo=centered("◀  Video sebelumnya",12f,Color.WHITE,true).apply {
+            setPadding(dp(12),dp(10),dp(12),dp(10))
+            isEnabled=videoIndex>0
+            alpha=if(isEnabled)1f else 0.35f
+            setOnClickListener {
+                if(videoIndex>0) {
+                    val next=videoList[videoIndex-1]
+                    dialog.dismiss()
+                    playVideo(next)
+                }
+            }
+        }
+        val nextVideo=centered("Video berikutnya  ▶",12f,Color.WHITE,true).apply {
+            setPadding(dp(12),dp(10),dp(12),dp(10))
+            isEnabled=videoIndex>=0 && videoIndex<videoList.lastIndex
+            alpha=if(isEnabled)1f else 0.35f
+            setOnClickListener {
+                if(videoIndex>=0 && videoIndex<videoList.lastIndex) {
+                    val next=videoList[videoIndex+1]
+                    dialog.dismiss()
+                    playVideo(next)
+                }
+            }
+        }
+        videoSwitch.addView(previousVideo)
+        videoSwitch.addView(nextVideo)
+        val videoOverlay=LinearLayout(this).apply {
+            orientation=LinearLayout.VERTICAL
+            gravity=Gravity.END
+            addView(zoomBar,LinearLayout.LayoutParams(-2,dp(42)))
+            addView(videoSwitch,LinearLayout.LayoutParams(-2,-2).apply { topMargin=dp(10) })
+        }
+        frame.addView(videoOverlay,FrameLayout.LayoutParams(-2,-2,Gravity.TOP or Gravity.END).apply { topMargin=dp(16); rightMargin=dp(14) })
+        val controlsTimeout=object:Runnable { override fun run() { videoOverlay.animate().alpha(0f).setDuration(250).withEndAction { videoOverlay.visibility=android.view.View.GONE }.start() } }
+        fun showVideoOverlay() {
+            handler.removeCallbacks(controlsTimeout)
+            videoOverlay.visibility=android.view.View.VISIBLE
+            videoOverlay.alpha=1f
+            handler.postDelayed(controlsTimeout,15000)
+        }
         val pinchZoom=android.view.ScaleGestureDetector(this,object:android.view.ScaleGestureDetector.SimpleOnScaleGestureListener() {
             override fun onScale(detector:android.view.ScaleGestureDetector):Boolean {
                 applyVideoZoom(videoZoom*detector.scaleFactor)
@@ -565,6 +622,7 @@ class MainActivity : Activity() {
             if(saved in 1..99 && video.duration>0) videoView.seekTo((video.duration*saved/100).toInt())
             videoView.start()
             controller.show(2500)
+            showVideoOverlay()
             saveProgress=object:Runnable {
                 override fun run() {
                     if(videoView.isPlaying && video.duration>0) {
@@ -586,7 +644,14 @@ class MainActivity : Activity() {
         val gesture=android.view.GestureDetector(this,object:android.view.GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e:android.view.MotionEvent)=true
             override fun onSingleTapConfirmed(e:android.view.MotionEvent):Boolean {
-                if(controller.isShowing) controller.hide() else controller.show(3000)
+                if(videoOverlay.visibility==android.view.View.VISIBLE) {
+                    handler.removeCallbacks(controlsTimeout)
+                    videoOverlay.visibility=android.view.View.GONE
+                    if(controller.isShowing) controller.hide()
+                } else {
+                    showVideoOverlay()
+                    controller.show(3000)
+                }
                 return true
             }
             override fun onDoubleTap(e:android.view.MotionEvent):Boolean {
@@ -623,6 +688,7 @@ class MainActivity : Activity() {
             true
         }
         dialog.setOnDismissListener {
+            handler.removeCallbacks(controlsTimeout)
             setVideoNavigationHidden(dialog, false)
             if (activeVideoDialog === dialog) activeVideoDialog = null
             saveProgress?.let{handler.removeCallbacks(it)}
