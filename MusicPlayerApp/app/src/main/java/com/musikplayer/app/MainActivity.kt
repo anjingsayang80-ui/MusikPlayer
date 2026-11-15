@@ -584,6 +584,7 @@ class MainActivity : Activity() {
         }
         fun showVideoPicker() {
             if(videoList.isEmpty()) return
+            lateinit var pickerDialog:AlertDialog
             val grid=GridView(this).apply {
                 numColumns=2
                 horizontalSpacing=dp(10)
@@ -642,7 +643,7 @@ class MainActivity : Activity() {
                 })
                 addView(grid,LinearLayout.LayoutParams(-1,maxGridHeight))
             }
-            val pickerDialog=AlertDialog.Builder(this)
+            pickerDialog=AlertDialog.Builder(this)
                 .setTitle("Pilih video")
                 .setView(pickerBox)
                 .setNegativeButton("Tutup",null)
