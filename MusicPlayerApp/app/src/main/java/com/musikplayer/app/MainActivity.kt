@@ -535,6 +535,7 @@ class MainActivity : Activity() {
         zoomBar.addView(centered("−",24f).apply { setPadding(dp(10),0,dp(10),0); setOnClickListener { applyVideoZoom(videoZoom-0.25f) } })
         zoomBar.addView(centered("1×",13f,Color.WHITE,true).apply { setPadding(dp(8),0,dp(8),0); setOnClickListener { applyVideoZoom(1f) } })
         zoomBar.addView(centered("+",24f).apply { setPadding(dp(10),0,dp(10),0); setOnClickListener { applyVideoZoom(videoZoom+0.25f) } })
+        lateinit var dialog:android.app.Dialog
         val videoSwitch=LinearLayout(this).apply {
             orientation=LinearLayout.HORIZONTAL
             gravity=Gravity.CENTER
@@ -590,7 +591,7 @@ class MainActivity : Activity() {
         val controller=android.widget.MediaController(this)
         controller.setAnchorView(frame)
         videoView.setMediaController(controller)
-        val dialog=android.app.Dialog(this,android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+        dialog=android.app.Dialog(this,android.R.style.Theme_Black_NoTitleBar_Fullscreen)
         dialog.setContentView(frame)
         dialog.window?.apply {
             setBackgroundDrawableResource(android.R.color.black)
