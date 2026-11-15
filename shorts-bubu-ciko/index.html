@@ -9,7 +9,7 @@
 main{width:min(100%,520px)}h1{font-size:21px;margin:0 0 5px}p{margin:0 0 13px;color:#cbd5f2;font-size:13px}
 .stage{padding:9px;border:1px solid #465b8d;border-radius:20px;background:#111a31;box-shadow:0 18px 55px #0009}
 canvas{display:block;width:100%;aspect-ratio:9/16;border-radius:13px;background:#101b36}
-.controls{display:flex;gap:9px;margin-top:10px}.controls button{flex:1;border:0;border-radius:12px;padding:13px 8px;font-weight:800;background:#ffd45e;color:#211b35;font-size:14px}.controls button:nth-child(2){background:#55d9d0}
+.controls{display:flex;gap:9px;margin-top:10px}.controls button{flex:1;border:0;border-radius:12px;padding:13px 8px;font-weight:800;background:#ffd45e;color:#211b35;font-size:14px}.controls button:nth-child(2){background:#55d9d0}.controls button:nth-child(3){background:#b9a5ff}
 .track{height:6px;background:#344362;border-radius:8px;margin-top:10px;overflow:hidden}.track span{display:block;width:0;height:100%;background:linear-gradient(90deg,#ffd45e,#53e7e0)}
 .note{font-size:12px;line-height:1.5;color:#aebbd8;margin:10px 3px}
 </style>
@@ -18,18 +18,19 @@ canvas{display:block;width:100%;aspect-ratio:9/16;border-radius:13px;background:
 <h1>⚡ Bubu & Ciko</h1><p>Legenda Kekuatan Tersembunyi · Adegan pembuka: Bayangan di Hutan</p>
 <div class="stage"><canvas id="screen" width="540" height="960" aria-label="Adegan animasi Bubu dan Ciko"></canvas>
 <div class="track"><span id="progress"></span></div>
-<div class="controls"><button id="play">▶ Putar adegan</button><button id="again">↻ Ulangi</button></div></div>
+<div class="controls"><button id="play">▶ Putar adegan</button><button id="again">↻ Ulangi</button><button id="voice">🔊 Suara: ON</button></div></div>
 <div class="note">Pratinjau animasi 2D interaktif. Putar untuk melihat gerakan, dialog, dan efek kekuatan. Prototipe ini belum berupa episode anime produksi penuh.</div>
 </main>
 <script>
 const c=document.getElementById('screen'),x=c.getContext('2d'),P=document.getElementById('progress'),play=document.getElementById('play');
-const W=540,H=960,D=24;let t=0,run=false,last=0,raf=0;
+const W=540,H=960,D=32;let t=0,run=false,last=0,raf=0,voiceOn=true,lastLine="";
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v)),ease=v=>{v=clamp(v,0,1);return v*v*(3-2*v)};
 function path(points,fill,stroke='#171a35',lw=5){x.beginPath();points.forEach((p,i)=>i?x.lineTo(p[0],p[1]):x.moveTo(p[0],p[1]));x.closePath();x.fillStyle=fill;x.fill();if(stroke){x.strokeStyle=stroke;x.lineWidth=lw;x.lineJoin='round';x.stroke()}}
 function oval(a,b,rx,ry,col){x.fillStyle=col;x.beginPath();x.ellipse(a,b,rx,ry,0,0,Math.PI*2);x.fill()}
 function line(a,b,d,e,col,w=8){x.strokeStyle=col;x.lineWidth=w;x.lineCap='round';x.beginPath();x.moveTo(a,b);x.lineTo(d,e);x.stroke()}
 function glow(a,b,r,col){let g=x.createRadialGradient(a,b,1,a,b,r);g.addColorStop(0,col);g.addColorStop(1,'#ffffff00');x.fillStyle=g;x.beginPath();x.arc(a,b,r,0,7);x.fill()}
 function label(s,y){x.fillStyle='#10182dcc';x.fillRect(25,y-39,490,66);x.fillStyle='#fff';x.font='bold 25px system-ui';x.textAlign='center';x.fillText(s,270,y+4)}
+function say(who,s){if(!voiceOn||!("speechSynthesis" in window))return;let line=who+": "+s;if(line===lastLine)return;lastLine=line;speechSynthesis.cancel();let u=new SpeechSynthesisUtterance(s);u.lang="id-ID";u.rate=.92;u.pitch=who==="CIKO"?1.25:who==="BUBU"?.88:.72;speechSynthesis.speak(u)}
 function speech(who,s){x.fillStyle='#fffdf5';x.strokeStyle='#26304e';x.lineWidth=4;x.beginPath();x.roundRect(40,112,460,106,20);x.fill();x.stroke();x.fillStyle='#26304e';x.textAlign='center';x.font='bold 18px system-ui';x.fillText(who,270,151);x.font='20px system-ui';x.fillText(s,270,187)}
 function forest(){let g=x.createLinearGradient(0,0,0,H);g.addColorStop(0,'#07132d');g.addColorStop(.55,'#18365a');g.addColorStop(1,'#10192d');x.fillStyle=g;x.fillRect(0,0,W,H);
 glow(405,115,105,'#a9d8ff66');oval(405,115,49,49,'#e4f2ff');
@@ -61,13 +62,16 @@ else if(t<8){caption='Bubu melindungi adiknya';bX=225-(t-4)*9;cX=375;dialog=['BU
 else if(t<12){caption='Kekuatan misterius mulai bangkit';energy=ease((t-8)/3);dialog=['CIKO','Aku... bisa merasakan kekuatan ini!']}
 else if(t<17){caption='Serangan gabungan!';energy=1;dialog=['BUBU & CIKO','Sekarang! Kekuatan kita, bersatu!']}
 else if(t<20){caption='Cahaya menerangi seluruh hutan';energy=1;glow(270,475,300,'#fff5bdcc')}
-else{caption='Siapakah bayangan itu sebenarnya?';dialog=['SUARA MISTERIUS','Kalian akhirnya terbangun...']}
+else if(t<24){caption='Bayangan menyerang dari belakang!';energy=1;dialog=['CIKO','Kak Bubu! Awas dari belakang!']}
+else if(t<28){caption='Ciko melepaskan gelombang energi';energy=1;dialog=['CIKO','Hyaaah! Pergi dari sini!']}
+else{caption='Musuh itu mengenali kekuatan Bubu';energy=1;dialog=['SUARA MISTERIUS','Pewaris Cahaya... akhirnya kutemukan.']}
 enemyX=t<17?420:510;enemy(enemyX);boy(bX,690,'bubu',t>12?-.3:0,energy);boy(cX,705,'ciko',t>10?.25:0,energy);
 if(energy>0){let q=ease((t-11)/5);for(let i=0;i<12;i++){let a=t*4+i*Math.PI/6,rr=70+q*130;let px=270+Math.cos(a)*rr,py=610+Math.sin(a)*rr;glow(px,py,18, i%2?'#45fff0bb':'#ffdc65bb')}}
 if(t>15&&t<20){let k=ease((t-15)/5);glow(270,510,360*k,'#fff8d8cc');}
-if(dialog)speech(dialog[0],dialog[1]);x.fillStyle='#0a1229cc';x.fillRect(25,850,490,72);x.fillStyle='#fff';x.textAlign='center';x.font='bold 22px system-ui';x.fillText(caption,270,894);P.style.width=(t/D*100)+'%'}
+if(dialog){speech(dialog[0],dialog[1]);say(dialog[0],dialog[1])}else{lastLine=""}x.fillStyle='#0a1229cc';x.fillRect(25,850,490,72);x.fillStyle='#fff';x.textAlign='center';x.font='bold 22px system-ui';x.fillText(caption,270,894);P.style.width=(t/D*100)+'%'}
 function frame(now){if(!run)return;if(!last)last=now;t+=Math.min((now-last)/1000,.05);last=now;if(t>=D){t=D;run=false;play.textContent='▶ Putar lagi'}draw();if(run)raf=requestAnimationFrame(frame)}
 play.onclick=()=>{if(t>=D)t=0;run=!run;last=0;play.textContent=run?'Ⅱ Jeda':'▶ Putar adegan';if(run)raf=requestAnimationFrame(frame);else cancelAnimationFrame(raf)};
-document.getElementById('again').onclick=()=>{run=false;cancelAnimationFrame(raf);t=0;last=0;play.textContent='▶ Putar adegan';draw()};
+document.getElementById('again').onclick=()=>{run=false;cancelAnimationFrame(raf);if('speechSynthesis' in window)speechSynthesis.cancel();t=0;last=0;lastLine='';play.textContent='▶ Putar adegan';draw()};
+document.getElementById('voice').onclick=()=>{voiceOn=!voiceOn;if(!voiceOn&&'speechSynthesis' in window)speechSynthesis.cancel();document.getElementById('voice').textContent=voiceOn?'🔊 Suara: ON':'🔇 Suara: OFF'};
 draw();
 </script></body></html>
