@@ -3,75 +3,71 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Bubu & Ciko — Episode 1: Mencuri Kue</title>
+<title>Bubu & Ciko — Legenda Kekuatan Tersembunyi</title>
 <style>
-*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 50% 0%,#40375f,#100f20 75%);color:#fff;font-family:system-ui,Arial,sans-serif;display:grid;place-items:center;min-height:100vh;padding:16px}
-main{width:min(100%,440px)}h1{font-size:21px;margin:0 0 5px}p{margin:0 0 12px;color:#c9c5dc;font-size:13px}
-.stage{background:#29233d;border:1px solid #51466d;border-radius:20px;padding:9px;box-shadow:0 16px 45px #0007}
-canvas{display:block;width:100%;aspect-ratio:9/16;background:#f9d99a;border-radius:13px;box-shadow:0 0 28px #ffc86a55}
-.controls{display:flex;gap:8px;margin-top:10px}.controls button{flex:1;border:0;border-radius:12px;padding:12px 8px;font-weight:700;background:#ffd45e;color:#30233c;font-size:14px}.controls button:nth-child(2){background:#5dd6c4}.bar{height:6px;background:#51466d;border-radius:8px;margin-top:10px;overflow:hidden}.bar span{display:block;height:100%;width:0;background:#ffd45e}
-.note{font-size:12px;color:#aaa4be;margin:10px 3px 0;line-height:1.5}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;padding:18px;background:radial-gradient(ellipse at top,#273e70,#090d1b 75%);color:#fff;font-family:system-ui,Arial,sans-serif;display:grid;place-items:center}
+main{width:min(100%,520px)}h1{font-size:21px;margin:0 0 5px}p{margin:0 0 13px;color:#cbd5f2;font-size:13px}
+.stage{padding:9px;border:1px solid #465b8d;border-radius:20px;background:#111a31;box-shadow:0 18px 55px #0009}
+canvas{display:block;width:100%;aspect-ratio:9/16;border-radius:13px;background:#101b36}
+.controls{display:flex;gap:9px;margin-top:10px}.controls button{flex:1;border:0;border-radius:12px;padding:13px 8px;font-weight:800;background:#ffd45e;color:#211b35;font-size:14px}.controls button:nth-child(2){background:#55d9d0}
+.track{height:6px;background:#344362;border-radius:8px;margin-top:10px;overflow:hidden}.track span{display:block;width:0;height:100%;background:linear-gradient(90deg,#ffd45e,#53e7e0)}
+.note{font-size:12px;line-height:1.5;color:#aebbd8;margin:10px 3px}
 </style>
 </head>
 <body><main>
-<h1>🐣 Bubu & Ciko — Episode 1</h1><p>Mencuri Kue · Animasi 2D · Pratinjau bergerak</p>
-<div class="stage"><canvas id="c" width="540" height="960" aria-label="Animasi Bubu dan Ciko"></canvas>
-<div class="bar"><span id="progress"></span></div>
-<div class="controls"><button id="play">▶ Putar</button><button id="restart">↻ Ulangi</button></div></div>
-<div class="note">Prototipe animasi ini berjalan di browser. Putar untuk melihat adegan, dialog, dan gerakan karakter.</div>
+<h1>⚡ Bubu & Ciko</h1><p>Legenda Kekuatan Tersembunyi · Adegan pembuka: Bayangan di Hutan</p>
+<div class="stage"><canvas id="screen" width="540" height="960" aria-label="Adegan animasi Bubu dan Ciko"></canvas>
+<div class="track"><span id="progress"></span></div>
+<div class="controls"><button id="play">▶ Putar adegan</button><button id="again">↻ Ulangi</button></div></div>
+<div class="note">Pratinjau animasi 2D interaktif. Putar untuk melihat gerakan, dialog, dan efek kekuatan. Prototipe ini belum berupa episode anime produksi penuh.</div>
 </main>
 <script>
-const canvas=document.getElementById('c'),ctx=canvas.getContext('2d'),W=540,H=960;
-const playBtn=document.getElementById('play'),restartBtn=document.getElementById('restart'),progress=document.getElementById('progress');
-let t=0,playing=false,last=0,raf=0;
-const duration=36;
-function rr(x,y,w,h,r,color){ctx.fillStyle=color;ctx.beginPath();ctx.roundRect(x,y,w,h,r);ctx.fill()}
-function ellipse(x,y,rx,ry,color){ctx.fillStyle=color;ctx.beginPath();ctx.ellipse(x,y,rx,ry,0,0,Math.PI*2);ctx.fill()}
-function line(x1,y1,x2,y2,color,width=8){ctx.strokeStyle=color;ctx.lineWidth=width;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke()}
-function text(s,x,y,size=30,color='#30233c',align='center',weight='700'){ctx.fillStyle=color;ctx.font=weight+' '+size+'px system-ui';ctx.textAlign=align;ctx.fillText(s,x,y)}
-function bubble(s,x,y,w=390){rr(x-w/2,y-48,w,92,22,'#fffdf6');ctx.strokeStyle='#443653';ctx.lineWidth=4;ctx.stroke();text(s,x,y+8,25,'#30233c')}
-function bg(){let g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#293e68');g.addColorStop(.48,'#e6a477');g.addColorStop(1,'#583e65');ctx.fillStyle=g;ctx.fillRect(0,0,W,H);for(let i=0;i<18;i++){let x=(i*97+Math.sin(t*.25+i)*24)%W,y=(i*131)%H;ctx.globalAlpha=.22;ellipse(x,y,2+(i%3),2+(i%3),'#fff4d0');}ctx.globalAlpha=1;
-rr(25,55,490,600,24,'#fff0cf');rr(55,90,430,430,16,'#f8d8a5');rr(75,110,390,250,10,'#8ebacb');
-line(270,110,270,360,'#fff0cf',9);line(75,235,465,235,'#fff0cf',9);
-rr(40,680,460,210,22,'#b66b52');rr(40,680,460,22,10,'#e99a68');rr(55,720,430,150,12,'#98533f');
-rr(75,610,390,70,18,'#f8c47a');}
-function cake(x,y,scale=1){ctx.save();ctx.translate(x,y);ctx.scale(scale,scale);
-rr(-90,-10,180,90,18,'#fff5e7');rr(-90,-10,180,25,12,'#ff8eb1');rr(-78,-45,156,45,14,'#fff5e7');rr(-78,-45,156,15,8,'#ff8eb1');
-for(let i=-48;i<=48;i+=48){ellipse(i,-51,8,12,'#f34f78');}ellipse(0,-75,11,16,'#e84c73');line(0,-90,0,-107,'#4b9d5a',5);
-ctx.restore();}
-function bubu(x,y,scale=1,mood='happy',bob=0){ctx.save();ctx.translate(x,y+bob);ctx.scale(scale,scale);
-line(-35,95,-48,150,'#51375e',18);line(35,95,48,150,'#51375e',18);rr(-76,145,58,24,12,'#342a43');rr(20,145,58,24,12,'#342a43');
-rr(-76,5,152,115,32,'#ffd33f');rr(-105,24,34,86,17,'#ffd33f');rr(71,24,34,86,17,'#ffd33f');
-ellipse(0,-45,80,87,'#f6c49b'); // ears
-ellipse(-78,-54,18,25,'#f6c49b');ellipse(78,-54,18,25,'#f6c49b');
-// purple hair
-ellipse(-42,-111,43,34,'#7547b5');ellipse(0,-129,48,37,'#7547b5');ellipse(43,-111,42,34,'#7547b5');ellipse(-5,-91,27,32,'#7547b5');
-ellipse(-28,-47,9,13,'#30233c');ellipse(28,-47,9,13,'#30233c');ellipse(-31,-51,3,4,'#fff');ellipse(25,-51,3,4,'#fff');
-if(mood==='shock'){ellipse(0,-5,15,20,'#7b304b')}else{ctx.strokeStyle='#9a4350';ctx.lineWidth=5;ctx.beginPath();ctx.arc(0,-14,20,0.2,Math.PI-0.2);ctx.stroke();}
-ellipse(-52,-18,13,8,'#f18e8d');ellipse(52,-18,13,8,'#f18e8d');
-ctx.restore();}
-function ciko(x,y,scale=1,mood='happy',bob=0){ctx.save();ctx.translate(x,y+bob);ctx.scale(scale,scale);
-// ears
-ctx.save();ctx.rotate(-.2);ellipse(-48,-102,19,64,'#28b8a9');ctx.restore();ctx.save();ctx.rotate(.2);ellipse(48,-102,19,64,'#28b8a9');ctx.restore();
-ellipse(0,-20,76,94,'#39cbbb');ellipse(-27,-35,10,13,'#173b46');ellipse(27,-35,10,13,'#173b46');
-ellipse(-30,-40,3,4,'#fff');ellipse(24,-40,3,4,'#fff');
-if(mood==='shock'){ellipse(0,0,13,18,'#173b46')}else{ctx.strokeStyle='#174c54';ctx.lineWidth=5;ctx.beginPath();ctx.arc(0,-3,20,.2,Math.PI-.2);ctx.stroke();}
-ellipse(-48,-5,12,7,'#83e6cf');ellipse(48,-5,12,7,'#83e6cf');
-line(-32,52,-38,92,'#168c83',14);line(32,52,38,92,'#168c83',14);
-rr(-61,87,48,20,9,'#f28c38');rr(14,87,48,20,9,'#f28c38');
-ctx.restore();}
-function scene(){bg();let s='';
-if(t<7){s='Rencana rahasia dimulai!';cake(270,620,.9);bubu(155,720,.95,'happy',Math.sin(t*5)*4);ciko(390,725,.9,'happy',Math.sin(t*5+1)*5);if(t>2)bubble('Ciko: “Kuenya kelihatan enak!”',270,180);}
-else if(t<14){s='Misi mengambil kue';cake(270,620,.9);bubu(155,720,.95,'shock',Math.sin(t*8)*5);ciko(390,725,.9,'happy',Math.sin(t*8+1)*5);bubble('Bubu: “Pelan-pelan, jangan berisik!”',270,180);}
-else if(t<21){s='Ups… ketahuan!';cake(270,620,.9);bubu(155,720,.95,'shock');ciko(390,725,.9,'shock');if(t>16)bubble('Suara Ibu: “SIAPA DI SITU?”',270,180);}
-else if(t<29){s='Ciko punya ide';cake(270,620,.9);bubu(155,720,.95,'shock',Math.sin(t*10)*7);ciko(390,725,.9,'happy',Math.sin(t*10)*8);bubble('Ciko: “Kita pura-pura jadi patung!”',270,180);}
-else{s='Plot twist: kuenya palsu!';cake(270,620,.9);bubu(155,720,.95,'shock');ciko(390,725,.9,'shock');bubble('Bubu: “Lho… ini kue sabun?!”',270,180);}
-rr(40,35,460,60,18,'#ffffffcc');text('BUBU & CIKO',270,75,28,'#53376d');
-rr(35,875,470,55,16,'#30233cdd');text(s,270,911,23,'#fff7dc');
-}
-function draw(){scene();progress.style.width=(t/duration*100)+'%';}
-function loop(now){if(!playing)return;if(!last)last=now;let dt=Math.min((now-last)/1000,.05);last=now;t+=dt;if(t>=duration){t=duration;playing=false;playBtn.textContent='▶ Putar lagi';}draw();if(playing)raf=requestAnimationFrame(loop);}
-playBtn.onclick=()=>{if(t>=duration)t=0;playing=!playing;playBtn.textContent=playing?'Ⅱ Jeda':'▶ Putar';last=0;if(playing)raf=requestAnimationFrame(loop);else cancelAnimationFrame(raf);};
-restartBtn.onclick=()=>{playing=false;cancelAnimationFrame(raf);t=0;last=0;playBtn.textContent='▶ Putar';draw();};
+const c=document.getElementById('screen'),x=c.getContext('2d'),P=document.getElementById('progress'),play=document.getElementById('play');
+const W=540,H=960,D=24;let t=0,run=false,last=0,raf=0;
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v)),ease=v=>{v=clamp(v,0,1);return v*v*(3-2*v)};
+function path(points,fill,stroke='#171a35',lw=5){x.beginPath();points.forEach((p,i)=>i?x.lineTo(p[0],p[1]):x.moveTo(p[0],p[1]));x.closePath();x.fillStyle=fill;x.fill();if(stroke){x.strokeStyle=stroke;x.lineWidth=lw;x.lineJoin='round';x.stroke()}}
+function oval(a,b,rx,ry,col){x.fillStyle=col;x.beginPath();x.ellipse(a,b,rx,ry,0,0,Math.PI*2);x.fill()}
+function line(a,b,d,e,col,w=8){x.strokeStyle=col;x.lineWidth=w;x.lineCap='round';x.beginPath();x.moveTo(a,b);x.lineTo(d,e);x.stroke()}
+function glow(a,b,r,col){let g=x.createRadialGradient(a,b,1,a,b,r);g.addColorStop(0,col);g.addColorStop(1,'#ffffff00');x.fillStyle=g;x.beginPath();x.arc(a,b,r,0,7);x.fill()}
+function label(s,y){x.fillStyle='#10182dcc';x.fillRect(25,y-39,490,66);x.fillStyle='#fff';x.font='bold 25px system-ui';x.textAlign='center';x.fillText(s,270,y+4)}
+function speech(who,s){x.fillStyle='#fffdf5';x.strokeStyle='#26304e';x.lineWidth=4;x.beginPath();x.roundRect(40,112,460,106,20);x.fill();x.stroke();x.fillStyle='#26304e';x.textAlign='center';x.font='bold 18px system-ui';x.fillText(who,270,151);x.font='20px system-ui';x.fillText(s,270,187)}
+function forest(){let g=x.createLinearGradient(0,0,0,H);g.addColorStop(0,'#07132d');g.addColorStop(.55,'#18365a');g.addColorStop(1,'#10192d');x.fillStyle=g;x.fillRect(0,0,W,H);
+glow(405,115,105,'#a9d8ff66');oval(405,115,49,49,'#e4f2ff');
+for(let i=0;i<16;i++){let xx=(i*83+20)%580-20,hh=270+(i*71)%300;x.fillStyle=i%2?'#0c2540':'#102b45';x.beginPath();x.moveTo(xx-90,720);x.lineTo(xx,720-hh);x.lineTo(xx+90,720);x.fill();line(xx,720-hh*.45,xx-30,720-hh*.65,'#24445c',10)}
+for(let i=0;i<32;i++){let xx=(i*71+Math.sin(t*1.7+i)*18)%540,yy=(i*113+Math.sin(t*2+i)*20)%720;glow(xx,yy,13,'#9de9ff88');oval(xx,yy,2.5,2.5,'#d8fbff')}
+x.fillStyle='#172338';x.beginPath();x.moveTo(0,720);for(let a=0;a<=540;a+=30)x.lineTo(a,700+Math.sin(a*.025)*18);x.lineTo(540,960);x.lineTo(0,960);x.fill()}
+function boy(cx,cy,kind,pose=0,energy=0){let purple=kind==='bubu',hair=purple?'#7846c5':'#159f9d',hood=purple?'#f4c735':'#20c6b9',skin='#f3c5a2';x.save();x.translate(cx,cy);x.rotate(pose*.06);
+ // legs, shoes
+ line(-20,88,-43,153,'#20253b',20);line(20,88,43,153,'#20253b',20);x.fillStyle='#f28b43';x.beginPath();x.roundRect(-69,143,47,22,9);x.roundRect(23,143,47,22,9);x.fill();
+ // torso and sleeves
+ x.fillStyle=hood;x.beginPath();x.roundRect(-57,-4,114,111,28);x.fill();x.strokeStyle='#17203c';x.lineWidth=5;x.stroke();
+ line(-48,17,-75,65,hood,22);line(48,17,75,65,hood,22);
+ // head
+ oval(0,-72,62,72,skin);oval(-60,-75,12,20,skin);oval(60,-75,12,20,skin);
+ // hair spikes
+ oval(0,-125,54,31,hair);path([[-53,-111],[-72,-151],[-36,-139],[-28,-176],[-2,-143],[21,-176],[31,-139],[66,-151],[48,-108]],hair,'#20203d',4);
+ // fringe
+ path([[-48,-112],[-26,-133],[-13,-112],[5,-139],[18,-111],[43,-128],[48,-93],[27,-101],[12,-91],[-9,-104],[-30,-91]],hair,'#20203d',3);
+ // eyes
+ oval(-23,-72,10,14,'#fff');oval(23,-72,10,14,'#fff');oval(-21,-70,5,9,'#29365d');oval(25,-70,5,9,'#29365d');line(-34,-91,-14,-95,'#30233c',5);line(14,-95,34,-91,'#30233c',5);
+ x.strokeStyle='#8f4651';x.lineWidth=4;x.beginPath();x.arc(0,-39,13,.2,Math.PI-.2);x.stroke();
+ // energy on arm
+ if(energy>0){glow(76,55,42*energy,purple?'#ffd34ecc':'#31f5e7cc');for(let k=0;k<3;k++){x.strokeStyle=purple?'#ffe16b':'#74fff3';x.lineWidth=4;x.beginPath();x.arc(76,55,20+k*10+Math.sin(t*9+k)*4, t*3+k,t*3+k+2.2);x.stroke()}}
+ x.restore()}
+function enemy(a){x.save();x.translate(a,0);glow(0,440,180,'#7d45d966');oval(0,430,95,180,'#080b1b');oval(-36,389,13,7,'#b76cff');oval(36,389,13,7,'#b76cff');for(let i=0;i<7;i++)line(-55+i*18,560,-85+i*23,665,'#090d20',15);x.restore()}
+function draw(){forest();let bX=165,cX=365,energy=0,enemyX=420,caption='Malam yang terasa berbeda',dialog=null;
+if(t<4){caption='Sesuatu bergerak di balik pepohonan';bX=165+Math.sin(t*3)*5;cX=365+Math.sin(t*3+1)*5}
+else if(t<8){caption='Bubu melindungi adiknya';bX=225-(t-4)*9;cX=375;dialog=['BUBU','Ciko, mundur! Ada sesuatu di sana.']}
+else if(t<12){caption='Kekuatan misterius mulai bangkit';energy=ease((t-8)/3);dialog=['CIKO','Aku... bisa merasakan kekuatan ini!']}
+else if(t<17){caption='Serangan gabungan!';energy=1;dialog=['BUBU & CIKO','Sekarang! Kekuatan kita, bersatu!']}
+else if(t<20){caption='Cahaya menerangi seluruh hutan';energy=1;glow(270,475,300,'#fff5bdcc')}
+else{caption='Siapakah bayangan itu sebenarnya?';dialog=['SUARA MISTERIUS','Kalian akhirnya terbangun...']}
+enemyX=t<17?420:510;enemy(enemyX);boy(bX,690,'bubu',t>12?-.3:0,energy);boy(cX,705,'ciko',t>10?.25:0,energy);
+if(energy>0){let q=ease((t-11)/5);for(let i=0;i<12;i++){let a=t*4+i*Math.PI/6,rr=70+q*130;let px=270+Math.cos(a)*rr,py=610+Math.sin(a)*rr;glow(px,py,18, i%2?'#45fff0bb':'#ffdc65bb')}}
+if(t>15&&t<20){let k=ease((t-15)/5);glow(270,510,360*k,'#fff8d8cc');}
+if(dialog)speech(dialog[0],dialog[1]);x.fillStyle='#0a1229cc';x.fillRect(25,850,490,72);x.fillStyle='#fff';x.textAlign='center';x.font='bold 22px system-ui';x.fillText(caption,270,894);P.style.width=(t/D*100)+'%'}
+function frame(now){if(!run)return;if(!last)last=now;t+=Math.min((now-last)/1000,.05);last=now;if(t>=D){t=D;run=false;play.textContent='▶ Putar lagi'}draw();if(run)raf=requestAnimationFrame(frame)}
+play.onclick=()=>{if(t>=D)t=0;run=!run;last=0;play.textContent=run?'Ⅱ Jeda':'▶ Putar adegan';if(run)raf=requestAnimationFrame(frame);else cancelAnimationFrame(raf)};
+document.getElementById('again').onclick=()=>{run=false;cancelAnimationFrame(raf);t=0;last=0;play.textContent='▶ Putar adegan';draw()};
 draw();
 </script></body></html>
