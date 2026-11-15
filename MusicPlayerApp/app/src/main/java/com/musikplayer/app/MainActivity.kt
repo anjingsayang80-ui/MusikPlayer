@@ -580,7 +580,75 @@ class MainActivity : Activity() {
             handler.removeCallbacks(controlsTimeout)
             videoOverlay.visibility=android.view.View.VISIBLE
             videoOverlay.alpha=1f
-            handler.postDelayed(controlsTimeout,15000)
+            handler.postDelayed(controlsTimeout,6000)
+        }
+        fun showVideoPicker() {
+            if(videoList.isEmpty()) return
+            val grid=GridView(this).apply {
+                numColumns=2
+                horizontalSpacing=dp(10)
+                verticalSpacing=dp(10)
+                stretchMode=GridView.STRETCH_COLUMN_WIDTH
+                setPadding(dp(12),dp(8),dp(12),dp(12))
+                clipToPadding=false
+                adapter=object:android.widget.BaseAdapter() {
+                    override fun getCount()=videoList.size
+                    override fun getItem(position:Int)=videoList[position]
+                    override fun getItemId(position:Int)=videoList[position].id
+                    override fun getView(position:Int,convertView:android.view.View?,parent:android.view.ViewGroup):android.view.View {
+                        val item=videoList[position]
+                        val card=convertView as? LinearLayout ?: LinearLayout(this@MainActivity).apply {
+                            orientation=LinearLayout.VERTICAL
+                            gravity=Gravity.CENTER_HORIZONTAL
+                            setPadding(dp(6),dp(6),dp(6),dp(6))
+                            background=panelBg(Color.rgb(29,28,40),10)
+                        }
+                        card.removeAllViews()
+                        val thumb=ImageView(this@MainActivity).apply {
+                            scaleType=ImageView.ScaleType.CENTER_CROP
+                            setImageResource(R.drawable.app_icon)
+                            tag=item.id
+                        }
+                        card.addView(thumb,LinearLayout.LayoutParams(-1,dp(78)))
+                        card.addView(label(item.title,12f,Color.WHITE,true).apply {
+                            maxLines=2
+                            ellipsize=android.text.TextUtils.TruncateAt.END
+                            setPadding(dp(3),dp(5),dp(3),dp(2))
+                        })
+                        Thread {
+                            try {
+                                val itemUri=ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,item.id)
+                                val bitmap=if(Build.VERSION.SDK_INT>=29) contentResolver.loadThumbnail(itemUri,Size(dp(160),dp(100)),null)
+                                else MediaStore.Video.Thumbnails.getThumbnail(contentResolver,item.id,MediaStore.Video.Thumbnails.MINI_KIND,null)
+                                handler.post { if(thumb.tag==item.id && bitmap!=null) thumb.setImageBitmap(bitmap) }
+                            } catch (_:Exception) {}
+                        }.start()
+                        card.setOnClickListener {
+                            val chosen=item
+                            pickerDialog.dismiss()
+                            dialog.dismiss()
+                            playVideo(chosen)
+                        }
+                        return card
+                    }
+                }
+            }
+            val maxGridHeight=minOf(dp(500), (resources.displayMetrics.heightPixels*0.62f).toInt())
+            val pickerBox=LinearLayout(this).apply {
+                orientation=LinearLayout.VERTICAL
+                setPadding(dp(8),dp(4),dp(8),dp(4))
+                addView(label("Geser daftar untuk melihat video lainnya • 2 kolom, 4 baris terlihat",11f,muted).apply {
+                    setPadding(dp(8),dp(4),dp(8),dp(8))
+                })
+                addView(grid,LinearLayout.LayoutParams(-1,maxGridHeight))
+            }
+            val pickerDialog=AlertDialog.Builder(this)
+                .setTitle("Pilih video")
+                .setView(pickerBox)
+                .setNegativeButton("Tutup",null)
+                .create()
+            pickerDialog.show()
+            pickerDialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
         }
         val pinchZoom=android.view.ScaleGestureDetector(this,object:android.view.ScaleGestureDetector.SimpleOnScaleGestureListener() {
             override fun onScale(detector:android.view.ScaleGestureDetector):Boolean {
@@ -644,6 +712,13 @@ class MainActivity : Activity() {
         var moved=false
         val gesture=android.view.GestureDetector(this,object:android.view.GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e:android.view.MotionEvent)=true
+            override fun onFling(e1:android.view.MotionEvent?,e2:android.view.MotionEvent,velocityX:Float,velocityY:Float):Boolean {
+                if(e1!=null && e1.y>=videoView.height-dp(120) && e1.y-e2.y>=dp(70)) {
+                    showVideoPicker()
+                    return true
+                }
+                return false
+            }
             override fun onSingleTapConfirmed(e:android.view.MotionEvent):Boolean {
                 if(videoOverlay.visibility==android.view.View.VISIBLE) {
                     handler.removeCallbacks(controlsTimeout)
@@ -854,8 +929,10 @@ class MainActivity : Activity() {
                             val moving=songs.removeAt(from)
                             songs.add(to.coerceAtMost(songs.size),moving)
                             saveSongOrder()
+                            val savedScroll=musicScroll.scrollY
                             renderSongs(search.text.toString())
-                            Toast.makeText(this@MainActivity,"Lagu dipindahkan ke nomor ${songs.indexOf(moving)+1}",Toast.LENGTH_SHORT).show()
+                            musicScroll.post { musicScroll.scrollTo(0,savedScroll) }
+                            Toast.makeText(this@MainActivity,"Lagu dipindahkan ke nomor ${songs.indexOf(moving)+1} dan urutannya disimpan",Toast.LENGTH_SHORT).show()
                         }
                         true
                     }
